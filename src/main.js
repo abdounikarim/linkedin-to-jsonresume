@@ -68,6 +68,93 @@ window.LinkedinToResumeJson = (() => {
     let _scrolledToLoad = false;
     const _toolPrefix = 'jtzLiToResumeJson';
     const _stylesInjected = false;
+    /**
+     * LinkedIn "Featured" attachments (`summaryTreasuryMedias`) are frequently articles, slide
+     * decks, videos, resumes, or other media - not necessarily a personal portfolio/website.
+     * These are known non-personal-site providers / domains, used to avoid misclassifying an
+     * attachment as `basics.website` just because it happens to be the first link found.
+     * This is inherently best-effort, since LinkedIn does not expose a "this is my personal site"
+     * flag on attachments.
+     */
+    const _nonPortfolioAttachmentProviders = [
+        'github',
+        'youtube',
+        'vimeo',
+        'medium',
+        'slideshare',
+        'twitter',
+        'x',
+        'facebook',
+        'instagram',
+        'linkedin',
+        'google docs',
+        'google slides',
+        'google drive',
+        'behance',
+        'dribbble',
+        'soundcloud',
+        'spotify',
+        'dropbox',
+        'figma',
+        'canva',
+        'issuu',
+        'docsend',
+        'prezi'
+    ];
+    const _nonPortfolioAttachmentDomains = [
+        'github.com',
+        'youtube.com',
+        'youtu.be',
+        'vimeo.com',
+        'medium.com',
+        'slideshare.net',
+        'twitter.com',
+        'x.com',
+        'facebook.com',
+        'instagram.com',
+        'linkedin.com',
+        'docs.google.com',
+        'drive.google.com',
+        'behance.net',
+        'dribbble.com',
+        'soundcloud.com',
+        'spotify.com',
+        'dropbox.com',
+        'figma.com',
+        'canva.com',
+        'issuu.com',
+        'docsend.com',
+        'prezi.com'
+    ];
+
+    /**
+     * Best-effort check for whether a LI "Featured" attachment is likely to be the user's own
+     * personal portfolio/website, as opposed to an article, video, slide deck, or other media
+     * hosted on a known third-party platform. LinkedIn does not expose a dedicated flag for this,
+     * so absence from the denylist (`_nonPortfolioAttachmentProviders` / `_nonPortfolioAttachmentDomains`)
+     * is treated as the closest available positive signal.
+     * @param {LiEntity} attachment
+     * @returns {boolean}
+     */
+    function looksLikePersonalWebsiteAttachment(attachment) {
+        const url = attachment.data.url || attachment.data.Url;
+        if (!url) {
+            return false;
+        }
+        const providerName = (attachment.providerName || '').toLowerCase();
+        if (providerName && _nonPortfolioAttachmentProviders.some((p) => providerName.includes(p))) {
+            return false;
+        }
+        let hostname = '';
+        try {
+            hostname = new URL(url).hostname.replace(/^www\./i, '').toLowerCase();
+        } catch (e) {
+            // Unparsable URL - can't confidently confirm or deny, so treat as not a portfolio
+            console.warn('looksLikePersonalWebsiteAttachment - failed to parse attachment URL', url, e);
+            return false;
+        }
+        return !_nonPortfolioAttachmentDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+    }
 
     /**
      * Builds a mini-db out of a LI schema obj
@@ -404,7 +491,7 @@ window.LinkedinToResumeJson = (() => {
         const _this = instance;
         const dash = endpoint === 'dashFullProfileWithEntities';
         let foundGithub = false;
-        const foundPortfolio = false;
+        let foundPortfolio = false;
         /** @type {ParseProfileSchemaResultSummary} */
         const resultSummary = {
             liResponse,
@@ -566,8 +653,16 @@ window.LinkedinToResumeJson = (() => {
                         _outputJsonStable.basics.profiles.push(formattedProfile);
                     }
                 }
-                // Since most people put potfolio as first link, guess that it will be
-                if (!captured && !foundPortfolio) {
+                // LinkedIn "Featured" attachments are commonly articles, videos, slide decks, or
+                // resumes - not necessarily a personal site. Only claim one as the user's
+                // portfolio/website if it doesn't match a known non-personal-site provider/domain
+                // (see `looksLikePersonalWebsiteAttachment`). This is still a best-effort guess -
+                // LinkedIn doesn't expose an explicit "personal website" flag on attachments - so
+                // prefer the (more reliable) `websites[].type.category === 'portfolio'` signal from
+                // `parseViaInternalApiContactInfo` when it's available; that function runs after
+                // this one and will overwrite this guess when it has a confident match.
+                if (!captured && !foundPortfolio && looksLikePersonalWebsiteAttachment(attachment)) {
+                    foundPortfolio = true;
                     captured = true;
                     _outputJsonLegacy.basics.website = url;
                     _outputJsonStable.basics.url = url;
