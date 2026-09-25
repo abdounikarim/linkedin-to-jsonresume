@@ -4,8 +4,6 @@
  * =============================
  */
 
-const extensionId = chrome.runtime.id;
-
 const STORAGE_KEYS = {
     schemaVersion: 'schemaVersion'
 };
@@ -16,47 +14,104 @@ const SPEC_OPTIONS = ['legacy', 'stable', 'beta'];
 const LANG_SELECT = document.querySelector('.langSelect');
 
 /**
- * Generate injectable code for capturing a value from the contentScript scope and passing back via message
- * @param {string} valueToCapture - Name of the scoped variable to capture
- * @param {string} [optKey] - Key to use as message identifier. Defaults to valueToCapture
+ * Get the id of the tab that this popup was opened for (i.e. the active tab in the current window).
+ * This is needed because `chrome.scripting.executeScript` (the MV3 replacement for the old
+ * `chrome.tabs.executeScript`) has no notion of an implicit "current tab" - it always requires an
+ * explicit `target.tabId`.
+ * @returns {Promise<number>}
  */
-const createMessageSenderInjectable = (valueToCapture, optKey) => {
-    return `chrome.runtime.sendMessage('${extensionId}', {
-        key: '${optKey || valueToCapture}',
-        value: ${valueToCapture}
-    });`;
-};
-const createMainInstanceCode = `
-isDebug = window.location.href.includes('li2jr_debug=true');
-window.LinkedinToResumeJson = isDebug ? LinkedinToResumeJson : window.LinkedinToResumeJson;
-// Reuse existing instance if possible
-liToJrInstance = typeof(liToJrInstance) !== 'undefined' ? liToJrInstance : new LinkedinToResumeJson(isDebug);
-`;
-const getLangStringsCode = `(async () => {
-    const supported = await liToJrInstance.getSupportedLocales();
-    const user = liToJrInstance.getViewersLocalLang();
-    const payload = {
-        supported,
-        user
+const getActiveTabId = async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || typeof tab.id !== 'number') {
+        throw new Error('linkedin-to-jsonresume: could not find an active tab to inject into');
     }
-    ${createMessageSenderInjectable('payload', 'locales')}
-})();
-`;
+    return tab.id;
+};
+
+/**
+ * === Functions below this point are injected into the LinkedIn page (via `chrome.scripting.executeScript`) ===
+ * They are serialized (`Function.prototype.toString`) and re-run inside the page's own isolated-world
+ * context, so they must be fully self-contained - they can't close over any variables from this file's
+ * scope. State that needs to survive between separate injections (e.g. the parser instance) is stashed
+ * on the page's own `window`, which persists across injections for as long as the tab isn't navigated -
+ * exactly like it did with `chrome.tabs.executeScript` under Manifest V2.
+ */
+
+/**
+ * Create the `LinkedinToResumeJson` instance for this page, reusing one if it already exists
+ * (e.g. from a previous time the popup was opened for this same tab).
+ */
+const createOrReuseInstanceInPage = () => {
+    window.isDebug = window.location.href.includes('li2jr_debug=true');
+    window.liToJrInstance = window.liToJrInstance || new window.LinkedinToResumeJson(window.isDebug);
+};
+
+/**
+ * Read back the supported / user locales from the page's `liToJrInstance`.
+ * @returns {Promise<{supported: string[], user: string}>}
+ */
+const getLangStringsInPage = async () => {
+    const supported = await window.liToJrInstance.getSupportedLocales();
+    const user = window.liToJrInstance.getViewersLocalLang();
+    return { supported, user };
+};
+
+/**
+ * @param {string} lang
+ */
+const setPreferLocaleInPage = (lang) => {
+    window.liToJrInstance.preferLocale = lang;
+    // eslint-disable-next-line no-console
+    console.log(window.liToJrInstance);
+    // eslint-disable-next-line no-console
+    console.log(window.liToJrInstance.preferLocale);
+};
+
+const generateVCardInPage = () => {
+    window.liToJrInstance.generateVCard();
+};
+
+/**
+ * @param {string} lang
+ * @param {SchemaVersion} version
+ */
+const parseAndShowOutputInPage = (lang, version) => {
+    window.liToJrInstance.preferLocale = lang;
+    window.liToJrInstance.parseAndShowOutput(version);
+};
+
+/**
+ * @param {string} lang
+ */
+const parseAndDownloadInPage = (lang) => {
+    window.liToJrInstance.preferLocale = lang;
+    window.liToJrInstance.parseAndDownload();
+};
+
+/**
+ * =============================
+ * =      Injection Helpers    =
+ * =============================
+ */
+
+/**
+ * Inject `main.js` (the bundled scraper/parser, built from `src/main.js`) into the given tab.
+ * Safe to call more than once - re-injecting just re-sets `window.LinkedinToResumeJson`, and
+ * `createOrReuseInstanceInPage` takes care of reusing any existing parser instance.
+ * @param {number} tabId
+ */
+const injectMainScript = (tabId) => {
+    return chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['main.js']
+    });
+};
 
 /**
  * Get the currently selected lang locale in the selector
  */
 const getSelectedLang = () => {
     return LANG_SELECT.value;
-};
-
-/**
- * Get JS string that can be eval'ed to get the program to run and show output
- * Note: Be careful of strings versus vars, escaping, etc.
- * @param {SchemaVersion} version
- */
-const getRunAndShowCode = (version) => {
-    return `liToJrInstance.preferLocale = '${getSelectedLang()}';liToJrInstance.parseAndShowOutput('${version}');`;
 };
 
 /**
@@ -85,28 +140,25 @@ const loadLangs = (langs) => {
     toggleEnabled(langs.length > 0);
 };
 
-const exportVCard = () => {
-    chrome.tabs.executeScript({
-        code: `liToJrInstance.generateVCard()`
+const exportVCard = async () => {
+    const tabId = await getActiveTabId();
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        func: generateVCardInPage
     });
 };
 
 /**
  * Set the desired export lang on the exporter instance
- * - Use `null` to unset
- * @param {string | null} lang
+ * @param {string} lang
  */
-const setLang = (lang) => {
-    chrome.tabs.executeScript(
-        {
-            code: `liToJrInstance.preferLocale = '${lang}';`
-        },
-        () => {
-            chrome.tabs.executeScript({
-                code: `console.log(liToJrInstance);console.log(liToJrInstance.preferLocale);`
-            });
-        }
-    );
+const setLang = async (lang) => {
+    const tabId = await getActiveTabId();
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        func: setPreferLocaleInPage,
+        args: [lang]
+    });
 };
 
 /** @param {SchemaVersion} version */
@@ -146,39 +198,26 @@ const getSpecVersion = () => {
  * =============================
  */
 
-chrome.runtime.onMessage.addListener((message, sender) => {
-    console.log(message);
-    if (sender.id === extensionId && message.key === 'locales') {
-        /** @type {{supported: string[], user: string}} */
-        const { supported, user } = message.value;
-        // Make sure user's own locale comes as first option
-        if (supported.includes(user)) {
-            supported.splice(supported.indexOf(user), 1);
-        }
-        supported.unshift(user);
-        loadLangs(supported);
-    }
-});
-
 document.getElementById('liToJsonButton').addEventListener('click', async () => {
     const versionOption = await getSpecVersion();
-    const runAndShowCode = getRunAndShowCode(versionOption);
-    chrome.tabs.executeScript(
-        {
-            code: `${runAndShowCode}`
-        },
-        () => {
-            setTimeout(() => {
-                // Close popup
-                window.close();
-            }, 700);
-        }
-    );
+    const tabId = await getActiveTabId();
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        func: parseAndShowOutputInPage,
+        args: [getSelectedLang(), versionOption]
+    });
+    setTimeout(() => {
+        // Close popup
+        window.close();
+    }, 700);
 });
 
-document.getElementById('liToJsonDownloadButton').addEventListener('click', () => {
-    chrome.tabs.executeScript({
-        code: `liToJrInstance.preferLocale = '${getSelectedLang()}';liToJrInstance.parseAndDownload();`
+document.getElementById('liToJsonDownloadButton').addEventListener('click', async () => {
+    const tabId = await getActiveTabId();
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        func: parseAndDownloadInPage,
+        args: [getSelectedLang()]
     });
 });
 
@@ -201,16 +240,27 @@ SPEC_SELECT.addEventListener('change', () => {
  */
 document.getElementById('versionDisplay').innerText = chrome.runtime.getManifest().version;
 
-chrome.tabs.executeScript(
-    {
-        file: 'main.js'
-    },
-    () => {
-        chrome.tabs.executeScript({
-            code: `${createMainInstanceCode}${getLangStringsCode}`
-        });
+(async () => {
+    const tabId = await getActiveTabId();
+    await injectMainScript(tabId);
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        func: createOrReuseInstanceInPage
+    });
+    const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: getLangStringsInPage
+    });
+    const { supported, user } = result;
+    // Make sure user's own locale comes as first option
+    if (supported.includes(user)) {
+        supported.splice(supported.indexOf(user), 1);
     }
-);
+    supported.unshift(user);
+    loadLangs(supported);
+})().catch((err) => {
+    console.error('linkedin-to-jsonresume: failed to initialize popup', err);
+});
 
 getSpecVersion().then((spec) => {
     SPEC_SELECT.value = spec;
