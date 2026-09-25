@@ -44,9 +44,43 @@ tasks:
   build:bookmarklet:
     deps: [build:webpack]
     cmd: node ./build-scripts/build-bookmarklet.js
+  # `build:browserext` targets Chrome (and Chromium-based browsers, e.g. Edge) by
+  # default, so `task build:browserext` alone keeps behaving exactly as before.
+  # To build for another browser, either:
+  #   - `task build:browserext -- --target=firefox`
+  #   - `task build:browserext TARGET_BROWSER=firefox`
+  #   - or use the dedicated `build:browserext:<browser>` task below.
   build:browserext:
     deps: [build:webpack]
-    cmd: node ./build-scripts/prep-browserext.js
+    vars:
+      TARGET_BROWSER: '{{.TARGET_BROWSER | default "chrome"}}'
+    cmd: node ./build-scripts/prep-browserext.js --target={{.TARGET_BROWSER}} {{.CLI_ARGS}}
+  build:browserext:chrome:
+    cmds:
+      - task: build:browserext
+        vars:
+          TARGET_BROWSER: chrome
+  build:browserext:firefox:
+    cmds:
+      - task: build:browserext
+        vars:
+          TARGET_BROWSER: firefox
+  # Same target-selection options as `build:browserext` (defaults to chrome).
   package:browserext:
-    deps: [build:browserext]
-    cmd: ./build-scripts/package-browserext.js
+    vars:
+      TARGET_BROWSER: '{{.TARGET_BROWSER | default "chrome"}}'
+    deps:
+      - task: build:browserext
+        vars:
+          TARGET_BROWSER: '{{.TARGET_BROWSER}}'
+    cmd: node ./build-scripts/package-browserext.js --target={{.TARGET_BROWSER}} {{.CLI_ARGS}}
+  package:browserext:chrome:
+    cmds:
+      - task: package:browserext
+        vars:
+          TARGET_BROWSER: chrome
+  package:browserext:firefox:
+    cmds:
+      - task: package:browserext
+        vars:
+          TARGET_BROWSER: firefox

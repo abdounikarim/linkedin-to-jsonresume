@@ -1,9 +1,27 @@
 import { ResumeSchemaLegacy as _ResumeSchemaLegacy } from './jsonresume.schema.legacy';
 import { ResumeSchemaStable as _ResumeSchemaStable, ResumeSchemaBeyondSpec as _ResumeSchemaBeyondSpec } from './jsonresume.schema.latest';
+import type WebExtBrowser from 'webextension-polyfill';
 
 declare global {
     interface GenObj {
         [k: string]: any;
+    }
+
+    /**
+     * Injected by the `webextension-polyfill` UMD bundle (`browser-polyfill.min.js`),
+     * which is loaded via a plain `<script>` tag / `importScripts()` call ahead of
+     * `browser-ext/popup.js` and `browser-ext/background.js`. Provides a
+     * promise-based `browser.*` API that works across Chrome, Firefox, and Edge.
+     * @see https://github.com/mozilla/webextension-polyfill
+     */
+    // eslint-disable-next-line no-var
+    var browser: typeof WebExtBrowser;
+
+    interface Window {
+        /** Set by the injected `main.js` content script (see `src/main.js`). */
+        LinkedinToResumeJson?: new (isDebug?: boolean) => any;
+        /** Lazily-created singleton, created/reused by `browser-ext/popup.js`'s injected helpers. */
+        liToJrInstance?: any;
     }
 
     // LI Types

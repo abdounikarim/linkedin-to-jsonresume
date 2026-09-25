@@ -36,8 +36,8 @@ There are (or *were*) a few different options for how to use this:
     2. Drag and drop the indicated link in the page to your bookmarks (toolbar)
     3. Navigate to your LinkedIn profile
     4. Click the bookmarklet, and then a modal should pop up with the exported JSON
-- **Unsupported for now**: Chrome Extension
-    - Currently, this is only supported via [sideloading](#chrome-side-loading-instructions), since the extension has not yet been updated to be compatible with Google's manifest v3 requirements. See [Issue #81](https://github.com/joshuatz/linkedin-to-jsonresume/issues/81) for details.
+- **Unsupported for now**: Browser Extension (Chrome, Edge, Firefox)
+    - Currently, this is only supported via sideloading - see [Chrome / Edge](#chrome--edge-side-loading-instructions) or [Firefox](#firefox-side-loading-instructions) side-loading instructions below. See [Issue #81](https://github.com/joshuatz/linkedin-to-jsonresume/issues/81) for details.
 
 <details>
     <summary><h2 style="display:inline;">Advanced Features (broken until extension fixed)</h2></summary>
@@ -82,18 +82,31 @@ There are several main buttons in the browser extension, with different effects.
 
 </details>
 
-### Chrome Side-loading Instructions
-Instead of installing from the Chrome Webstore, you might might want to "side-load" a ZIP build for either local development, or to try out a new release that has not yet made it through the Chrome review process. Here are the instructions for doing so:
+### Chrome / Edge Side-loading Instructions
+Instead of installing from the Chrome Webstore, you might might want to "side-load" a ZIP build for either local development, or to try out a new release that has not yet made it through the Chrome review process. Here are the instructions for doing so (the same steps work for Edge, at `edge://extensions`):
 
 1. Find the ZIP you want to load
      - If you want to side-load the latest version, you can download a ZIP from [the releases tab](https://github.com/joshuatz/linkedin-to-jsonresume/releases/)
-     - If you want to side-load a local build, use `npm run package-browserext` to create a ZIP
+     - If you want to side-load a local build, use `task package:browserext` to create a ZIP (see [Building the browser extension](#building-the-browser-extension) below)
 2. Go to Chrome's extension setting page (`chrome://extensions`)
 3. Turn on developer mode (upper right toggle switch)
 4. Drag the downloaded zip to the browser to let it install
 5. Test it out, then uninstall
 
 You can also unpack the ZIP and load it as "unpacked".
+
+### Firefox Side-loading Instructions
+Firefox uses the same extension source, but needs its own build/package (see [Building the browser extension](#building-the-browser-extension) below) since it requires a couple of Firefox-specific manifest keys.
+
+1. Build (or download) a Firefox-targeted package:
+     - `task build:browserext:firefox` produces an unpacked build in `./build-browserext`
+     - `task package:browserext:firefox` additionally zips it up, into `./webstore-zips`
+2. Open `about:debugging` in Firefox
+3. Click "This Firefox" in the left sidebar
+4. Click "Load Temporary Add-on…"
+5. Select any file inside the unpacked `./build-browserext` folder (e.g. `manifest.json`) - or, if you have a ZIP, you can select that directly instead
+
+> Note: "Temporary Add-ons" loaded this way are removed when Firefox restarts, and are only meant for local testing/development - not for a persistent install.
 
 ## Troubleshooting
 When in doubt, refresh the profile page before using this tool.
@@ -178,6 +191,23 @@ You can use `task --list-all` to see all available `task` commands.
 `task build:browserext` will transpile and copy all the right files to `./build-browserext`, which you can then side-load into your browser. If you want to produce a single ZIP archive for the extension, `task package:browserext` will do that.
 
 > Use `TARGET=dev task build:browserext` for a source-map debug version. To get more console output, append `li2jr_debug=true` to the query string of the LI profile you are using the tool with.
+
+#### Cross-browser builds (Chrome, Edge, Firefox)
+The extension source in `browser-ext/` is shared across all browsers, and uses [`webextension-polyfill`](https://github.com/mozilla/webextension-polyfill) so it can call the promise-based `browser.*` API uniformly (this gets polyfilled onto Chrome/Edge, and is native on Firefox). The only thing that actually differs per-browser is the manifest - Firefox needs a `browser_specific_settings.gecko.id`, and (per [Firefox's current Manifest V3 docs](https://extensionworkshop.com/documentation/develop/manifest-v3-migration-guide/)) uses `background.scripts` instead of `background.service_worker`. That override lives in `browser-ext/manifest.firefox.json`, and gets merged on top of the base (Chrome-shaped) `browser-ext/manifest.json` at build time by `build-scripts/prep-browserext.js`.
+
+`task build:browserext` defaults to the Chrome target, so the existing invocation keeps working unchanged. To build for a specific browser, use any of:
+
+```sh
+# Dedicated per-browser tasks
+task build:browserext:chrome
+task build:browserext:firefox
+
+# ...or pass the target explicitly to the generic task
+task build:browserext -- --target=firefox
+task build:browserext TARGET_BROWSER=firefox
+```
+
+The same options work for `task package:browserext` (and its `:chrome` / `:firefox` variants) to produce a ZIP - the output filename is suffixed with the target (e.g. `build_3.3.0_firefox.zip`) for anything other than the default Chrome build.
 
 ### Building the bookmarklet version
 Currently, the build process looks like this:
