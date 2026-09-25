@@ -1,4 +1,4 @@
-# LinkedIn Profile to JSON Resume Browser Tool ![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/joshuatz/linkedin-to-jsonresume)
+# LinkedIn Profile to JSON Resume Browser Tool ![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/joshuatz/linkedin-to-jsonresume) [![CI](https://github.com/joshuatz/linkedin-to-jsonresume/actions/workflows/ci.yml/badge.svg)](https://github.com/joshuatz/linkedin-to-jsonresume/actions/workflows/ci.yml)
 
 > An extremely easy-to-use browser extension for exporting your full LinkedIn Profile to a JSON Resume file or string.
 
