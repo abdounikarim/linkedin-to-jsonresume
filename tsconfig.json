@@ -5,7 +5,8 @@
         "build-bookmarklet",
         "build-browserext",
         "webstore-zips",
-        "scratch"
+        "scratch",
+        "eslint.config.mjs"
     ],
     "compilerOptions": {
         "baseUrl": ".",
