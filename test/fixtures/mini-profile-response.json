@@ -1,0 +1,59 @@
+{
+    "data": {
+        "$type": "com.linkedin.restli.common.CollectionResponse",
+        "*elements": ["urn:li:fsd_position:2", "urn:li:fsd_position:1", "urn:li:fsd_position:3"],
+        "positionGroup": "urn:li:fsd_profilePositionGroup:groupA",
+        "positionGroupNoStarElements": "urn:li:fsd_profilePositionGroup:groupB",
+        "directOrderedKeys": ["urn:li:fsd_position:3", "urn:li:fsd_position:1"],
+        "mainProfile": "urn:li:fsd_profile:testProfile123"
+    },
+    "included": [
+        {
+            "entityUrn": "urn:li:fsd_profilePositionGroup:groupA",
+            "$type": "com.linkedin.voyager.dash.identity.profile.PositionGroup",
+            "*elements": ["urn:li:fsd_position:1", "urn:li:fsd_position:2"]
+        },
+        {
+            "entityUrn": "urn:li:fsd_position:1",
+            "$type": "com.linkedin.voyager.dash.identity.profile.Position",
+            "title": "Software Engineer",
+            "companyName": "Acme Corporation",
+            "timePeriod": {
+                "startDate": { "year": 2015, "month": 6 },
+                "endDate": { "year": 2018, "month": 1 }
+            }
+        },
+        {
+            "entityUrn": "urn:li:fsd_position:3",
+            "$type": "com.linkedin.voyager.dash.identity.profile.Position",
+            "title": "Staff Engineer",
+            "companyName": "Acme Corporation",
+            "timePeriod": {
+                "startDate": { "year": 2020, "month": 3 }
+            }
+        },
+        {
+            "entityUrn": "urn:li:fsd_position:2",
+            "$type": "com.linkedin.voyager.dash.identity.profile.Position",
+            "title": "Senior Software Engineer",
+            "companyName": "Acme Corporation",
+            "timePeriod": {
+                "startDate": { "year": 2018, "month": 1 },
+                "endDate": { "year": 2020, "month": 3 }
+            }
+        },
+        {
+            "entityUrn": "urn:li:fsd_profilePositionGroup:groupB",
+            "$type": "com.linkedin.voyager.dash.identity.profile.PositionGroup",
+            "elements": ["urn:li:fsd_position:3", "urn:li:fsd_position:2"]
+        },
+        {
+            "entityUrn": "urn:li:fsd_profile:testProfile123",
+            "$type": "com.linkedin.voyager.identity.profile.Profile",
+            "objectUrn": "urn:li:member:123456789",
+            "publicIdentifier": "test-profile-123",
+            "firstName": "Jordan",
+            "lastName": "Sample"
+        }
+    ]
+}
