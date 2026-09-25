@@ -74,6 +74,15 @@ There are several main buttons in the browser extension, with different effects.
  - *Download vCard File*: Export and download the profile as a Virtual Contact File (`.vcf`) (aka *vCard*)
      - There are some caveats with this format; see below
 
+#### Sharing via GitHub Gist
+The export modal (from *LinkedIn Profile to JSON*) also has a **Create Shareable Gist** button, which uploads the JSON currently shown in the textarea to GitHub as a [Gist](https://gist.github.com/), and gives you back a link you can share, instead of having to copy/paste or send a file around.
+
+A few important things to know before using it:
+ - Gist creation is fully anonymous - no GitHub login or token is used or required by this tool.
+ - The gist defaults to **unlisted/"secret"** (the "Make gist public" checkbox starts unchecked); you have to explicitly opt in to making it publicly listed/searchable.
+ - **Even an "unlisted" gist is not private** - anyone who has (or guesses/finds) the URL can view it. Because anonymous gists aren't tied to a GitHub account, **you cannot edit or delete it later** unless you save the URL returned right after creation - GitHub gives no other way to manage it afterwards.
+ - Since the export can contain personal data (name, contact details, work history, etc.), only use this if you're comfortable with that data being hosted indefinitely on GitHub's servers.
+ - GitHub's public API enforces a fairly strict rate limit for unauthenticated requests (on the order of 60 requests/hour per IP address, per [GitHub's REST API docs](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) - please double check current limits, as GitHub may change these). If gist creation fails, this is shown as an inline error in the modal; wait a bit and try again if you suspect you've been rate-limited.
 
 #### vCard Limitations and Caveats
  - Partial birthdate (aka `BDAY`) values (e.g. where the profile has a month and day, but has not opted to share their birth year), are only supported in v4 (RFC-6350) and above. This extension currently only supports v3, so in these situations the tool will simply omit the BDAY field from the export
