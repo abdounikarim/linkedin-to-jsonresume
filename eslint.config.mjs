@@ -123,4 +123,15 @@ export default [
             ],
         },
     },
+
+    // webpack config files are plain Node/CommonJS scripts loaded directly by
+    // webpack-cli (no "type": "module" in package.json), not part of the
+    // browser/TS module graph the rest of this ruleset targets - `require()`
+    // is the correct, intentional way to load `path` here.
+    {
+        files: ['webpack.*.js'],
+        rules: {
+            '@typescript-eslint/no-require-imports': 'off',
+        },
+    },
 ];

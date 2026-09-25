@@ -238,4 +238,4 @@ export interface ResumeSchemaStable {
 /**
  * Currently even - nothing beyond v1
  */
-export interface ResumeSchemaBeyondSpec extends ResumeSchemaStable {}
+export type ResumeSchemaBeyondSpec = ResumeSchemaStable;
