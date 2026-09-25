@@ -1502,6 +1502,487 @@ window.LinkedinToResumeJson = (() => {
         }
     };
 
+    // ---------------------------------------------------------------------
+    // Human-readable "Preview" rendering for the export modal.
+    // Like the rest of the modal, this is built purely with `createElement` /
+    // `.textContent` / `.appendChild` (never `.innerHTML`) to stay compatible
+    // with the TrustedHTML CSP that LinkedIn enforces on its pages.
+    // ---------------------------------------------------------------------
+
+    /**
+     * Shorthand for creating a DOM element, optionally with a class and text content.
+     * @param {string} tagName
+     * @param {string} [className]
+     * @param {string} [text]
+     * @returns {HTMLElement}
+     */
+    function createPreviewEl(tagName, className, text) {
+        const el = document.createElement(tagName);
+        if (className) {
+            el.className = className;
+        }
+        if (typeof text === 'string' && text) {
+            el.textContent = text;
+        }
+        return el;
+    }
+
+    /**
+     * Remove all child nodes from an element (safe replacement for `.innerHTML = ''`).
+     * @param {HTMLElement} el
+     */
+    function clearEl(el) {
+        while (el.firstChild) {
+            el.removeChild(el.firstChild);
+        }
+    }
+
+    /**
+     * Recursively check whether a value has any meaningful, renderable content.
+     * @param {any} value
+     * @returns {boolean}
+     */
+    function previewHasContent(value) {
+        if (value === null || typeof value === 'undefined') {
+            return false;
+        }
+        if (Array.isArray(value)) {
+            return value.some((item) => previewHasContent(item));
+        }
+        if (typeof value === 'object') {
+            return Object.keys(value).some((key) => previewHasContent(value[key]));
+        }
+        if (typeof value === 'string') {
+            return value.trim().length > 0;
+        }
+        return true;
+    }
+
+    /**
+     * Return the first non-empty string found across a list of possible keys on an object. Used
+     * to smooth over differences between "legacy" and "stable" JSON Resume field names (e.g.
+     * `website`/`url`, `picture`/`image`).
+     * @param {{[key: string]: any}} obj
+     * @param {string[]} keys
+     * @returns {string}
+     */
+    function firstNonEmptyStr(obj, keys) {
+        if (!obj) {
+            return '';
+        }
+        for (let i = 0; i < keys.length; i++) {
+            const val = obj[keys[i]];
+            if (typeof val === 'string' && val.trim()) {
+                return val.trim();
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Format a JSON Resume style start/end date pair into a human readable range.
+     * @param {string} [startDate]
+     * @param {string} [endDate]
+     * @returns {string}
+     */
+    function formatPreviewDateRange(startDate, endDate) {
+        const start = (startDate || '').trim();
+        const end = (endDate || '').trim();
+        if (!start && !end) {
+            return '';
+        }
+        if (start && !end) {
+            return `${start} – Present`;
+        }
+        if (!start && end) {
+            return end;
+        }
+        return `${start} – ${end}`;
+    }
+
+    /**
+     * Append a `<section>` (with heading) to `parent`, but only if `populate` actually adds
+     * content to the section body. Keeps empty sections from showing up in the preview.
+     * @param {HTMLElement} parent
+     * @param {string} headingText
+     * @param {(body: HTMLElement) => void} populate
+     */
+    function appendPreviewSection(parent, headingText, populate) {
+        const body = createPreviewEl('div', `${_toolPrefix}_previewSectionBody`);
+        populate(body);
+        if (!body.hasChildNodes()) {
+            return;
+        }
+        const section = createPreviewEl('section', `${_toolPrefix}_previewSection`);
+        section.appendChild(createPreviewEl('h3', `${_toolPrefix}_previewHeading`, headingText));
+        section.appendChild(body);
+        parent.appendChild(section);
+    }
+
+    /**
+     * Render the "basics" block of a JSON Resume object (name, label, summary, location, contact links).
+     * @param {HTMLElement} parent
+     * @param {{[key: string]: any}} basics
+     */
+    function renderPreviewBasics(parent, basics) {
+        if (!basics || !previewHasContent(basics)) {
+            return;
+        }
+        const container = createPreviewEl('div', `${_toolPrefix}_previewBasics`);
+
+        const name = firstNonEmptyStr(basics, ['name']);
+        if (name) {
+            container.appendChild(createPreviewEl('h2', `${_toolPrefix}_previewName`, name));
+        }
+
+        const label = firstNonEmptyStr(basics, ['label']);
+        if (label) {
+            container.appendChild(createPreviewEl('div', `${_toolPrefix}_previewLabel`, label));
+        }
+
+        const location = basics.location || {};
+        const locationParts = [location.city, location.region, location.countryCode].filter(
+            (part) => typeof part === 'string' && part.trim()
+        );
+        if (locationParts.length) {
+            container.appendChild(createPreviewEl('div', `${_toolPrefix}_previewLocation`, locationParts.join(', ')));
+        }
+
+        const contactList = createPreviewEl('ul', `${_toolPrefix}_previewContactList`);
+        const email = firstNonEmptyStr(basics, ['email']);
+        if (email) {
+            contactList.appendChild(createPreviewEl('li', '', email));
+        }
+        const phone = firstNonEmptyStr(basics, ['phone']);
+        if (phone) {
+            contactList.appendChild(createPreviewEl('li', '', phone));
+        }
+        const website = firstNonEmptyStr(basics, ['url', 'website']);
+        if (website) {
+            contactList.appendChild(createPreviewEl('li', '', website));
+        }
+        if (Array.isArray(basics.profiles)) {
+            basics.profiles.forEach((profile) => {
+                if (!previewHasContent(profile)) {
+                    return;
+                }
+                const network = firstNonEmptyStr(profile, ['network']);
+                const username = firstNonEmptyStr(profile, ['username']);
+                const url = firstNonEmptyStr(profile, ['url']);
+                const label2 = [network, username].filter(Boolean).join(': ');
+                const text = [label2, url].filter(Boolean).join(' - ');
+                if (text) {
+                    contactList.appendChild(createPreviewEl('li', '', text));
+                }
+            });
+        }
+        if (contactList.hasChildNodes()) {
+            container.appendChild(contactList);
+        }
+
+        const summary = firstNonEmptyStr(basics, ['summary']);
+        if (summary) {
+            container.appendChild(createPreviewEl('p', `${_toolPrefix}_previewSummary`, summary));
+        }
+
+        if (container.hasChildNodes()) {
+            parent.appendChild(container);
+        }
+    }
+
+    /**
+     * Render a list of "work"/"volunteer" style entries (both share the same shape, aside from
+     * `company` vs `organization`).
+     * @param {HTMLElement} body
+     * @param {{[key: string]: any}[]} entries
+     * @param {string[]} orgKeys - Keys to check for the org/company name.
+     */
+    function renderPreviewWorkLike(body, entries, orgKeys) {
+        entries.forEach((entry) => {
+            if (!previewHasContent(entry)) {
+                return;
+            }
+            const article = createPreviewEl('article', `${_toolPrefix}_previewEntry`);
+            const org = firstNonEmptyStr(entry, orgKeys);
+            const position = firstNonEmptyStr(entry, ['position']);
+            const titleText = [position, org].filter(Boolean).join(' at ') || org || position;
+            if (titleText) {
+                article.appendChild(createPreviewEl('h4', `${_toolPrefix}_previewEntryTitle`, titleText));
+            }
+            const dateRange = formatPreviewDateRange(entry.startDate, entry.endDate);
+            if (dateRange) {
+                article.appendChild(createPreviewEl('div', `${_toolPrefix}_previewEntryDates`, dateRange));
+            }
+            const summary = firstNonEmptyStr(entry, ['summary']);
+            if (summary) {
+                article.appendChild(createPreviewEl('p', `${_toolPrefix}_previewEntrySummary`, summary));
+            }
+            if (Array.isArray(entry.highlights) && entry.highlights.length) {
+                const list = createPreviewEl('ul', `${_toolPrefix}_previewEntryHighlights`);
+                entry.highlights.forEach((highlight) => {
+                    if (typeof highlight === 'string' && highlight.trim()) {
+                        list.appendChild(createPreviewEl('li', '', highlight));
+                    }
+                });
+                if (list.hasChildNodes()) {
+                    article.appendChild(list);
+                }
+            }
+            if (article.hasChildNodes()) {
+                body.appendChild(article);
+            }
+        });
+    }
+
+    /**
+     * Render "education" entries.
+     * @param {HTMLElement} body
+     * @param {{[key: string]: any}[]} entries
+     */
+    function renderPreviewEducation(body, entries) {
+        entries.forEach((entry) => {
+            if (!previewHasContent(entry)) {
+                return;
+            }
+            const article = createPreviewEl('article', `${_toolPrefix}_previewEntry`);
+            const institution = firstNonEmptyStr(entry, ['institution']);
+            if (institution) {
+                article.appendChild(createPreviewEl('h4', `${_toolPrefix}_previewEntryTitle`, institution));
+            }
+            const studyType = firstNonEmptyStr(entry, ['studyType']);
+            const area = firstNonEmptyStr(entry, ['area']);
+            const degreeText = [studyType, area].filter(Boolean).join(', ');
+            if (degreeText) {
+                article.appendChild(createPreviewEl('div', `${_toolPrefix}_previewEntrySubtitle`, degreeText));
+            }
+            const dateRange = formatPreviewDateRange(entry.startDate, entry.endDate);
+            if (dateRange) {
+                article.appendChild(createPreviewEl('div', `${_toolPrefix}_previewEntryDates`, dateRange));
+            }
+            const score = firstNonEmptyStr(entry, ['gpa', 'score']);
+            if (score) {
+                article.appendChild(createPreviewEl('div', `${_toolPrefix}_previewEntryMeta`, `Grade: ${score}`));
+            }
+            if (article.hasChildNodes()) {
+                body.appendChild(article);
+            }
+        });
+    }
+
+    /**
+     * Render "skills" entries as a simple list.
+     * @param {HTMLElement} body
+     * @param {{[key: string]: any}[]} entries
+     */
+    function renderPreviewSkills(body, entries) {
+        const list = createPreviewEl('ul', `${_toolPrefix}_previewSkillList`);
+        entries.forEach((entry) => {
+            if (!previewHasContent(entry)) {
+                return;
+            }
+            const name = firstNonEmptyStr(entry, ['name']);
+            if (!name) {
+                return;
+            }
+            const level = firstNonEmptyStr(entry, ['level']);
+            const keywords = Array.isArray(entry.keywords) ? entry.keywords.filter((k) => typeof k === 'string' && k.trim()) : [];
+            let text = name;
+            if (level) {
+                text += ` (${level})`;
+            }
+            if (keywords.length) {
+                text += ` - ${keywords.join(', ')}`;
+            }
+            list.appendChild(createPreviewEl('li', '', text));
+        });
+        if (list.hasChildNodes()) {
+            body.appendChild(list);
+        }
+    }
+
+    /**
+     * Render "certificates" entries.
+     * @param {HTMLElement} body
+     * @param {{[key: string]: any}[]} entries
+     */
+    function renderPreviewCertificates(body, entries) {
+        entries.forEach((entry) => {
+            if (!previewHasContent(entry)) {
+                return;
+            }
+            const article = createPreviewEl('article', `${_toolPrefix}_previewEntry`);
+            const name = firstNonEmptyStr(entry, ['name']);
+            const issuer = firstNonEmptyStr(entry, ['issuer']);
+            const titleText = [name, issuer].filter(Boolean).join(' - ');
+            if (titleText) {
+                article.appendChild(createPreviewEl('h4', `${_toolPrefix}_previewEntryTitle`, titleText));
+            }
+            const date = firstNonEmptyStr(entry, ['date']);
+            if (date) {
+                article.appendChild(createPreviewEl('div', `${_toolPrefix}_previewEntryDates`, date));
+            }
+            const url = firstNonEmptyStr(entry, ['url']);
+            if (url) {
+                article.appendChild(createPreviewEl('div', `${_toolPrefix}_previewEntryMeta`, url));
+            }
+            if (article.hasChildNodes()) {
+                body.appendChild(article);
+            }
+        });
+    }
+
+    /**
+     * Render "awards" entries.
+     * @param {HTMLElement} body
+     * @param {{[key: string]: any}[]} entries
+     */
+    function renderPreviewAwards(body, entries) {
+        entries.forEach((entry) => {
+            if (!previewHasContent(entry)) {
+                return;
+            }
+            const article = createPreviewEl('article', `${_toolPrefix}_previewEntry`);
+            const title = firstNonEmptyStr(entry, ['title']);
+            const awarder = firstNonEmptyStr(entry, ['awarder']);
+            const titleText = [title, awarder].filter(Boolean).join(' - ');
+            if (titleText) {
+                article.appendChild(createPreviewEl('h4', `${_toolPrefix}_previewEntryTitle`, titleText));
+            }
+            const date = firstNonEmptyStr(entry, ['date']);
+            if (date) {
+                article.appendChild(createPreviewEl('div', `${_toolPrefix}_previewEntryDates`, date));
+            }
+            const summary = firstNonEmptyStr(entry, ['summary']);
+            if (summary) {
+                article.appendChild(createPreviewEl('p', `${_toolPrefix}_previewEntrySummary`, summary));
+            }
+            if (article.hasChildNodes()) {
+                body.appendChild(article);
+            }
+        });
+    }
+
+    /**
+     * Render "publications" entries.
+     * @param {HTMLElement} body
+     * @param {{[key: string]: any}[]} entries
+     */
+    function renderPreviewPublications(body, entries) {
+        entries.forEach((entry) => {
+            if (!previewHasContent(entry)) {
+                return;
+            }
+            const article = createPreviewEl('article', `${_toolPrefix}_previewEntry`);
+            const name = firstNonEmptyStr(entry, ['name']);
+            const publisher = firstNonEmptyStr(entry, ['publisher']);
+            const titleText = [name, publisher].filter(Boolean).join(' - ');
+            if (titleText) {
+                article.appendChild(createPreviewEl('h4', `${_toolPrefix}_previewEntryTitle`, titleText));
+            }
+            const date = firstNonEmptyStr(entry, ['releaseDate']);
+            if (date) {
+                article.appendChild(createPreviewEl('div', `${_toolPrefix}_previewEntryDates`, date));
+            }
+            const summary = firstNonEmptyStr(entry, ['summary']);
+            if (summary) {
+                article.appendChild(createPreviewEl('p', `${_toolPrefix}_previewEntrySummary`, summary));
+            }
+            const url = firstNonEmptyStr(entry, ['url', 'website']);
+            if (url) {
+                article.appendChild(createPreviewEl('div', `${_toolPrefix}_previewEntryMeta`, url));
+            }
+            if (article.hasChildNodes()) {
+                body.appendChild(article);
+            }
+        });
+    }
+
+    /**
+     * Render "languages" entries as a simple list.
+     * @param {HTMLElement} body
+     * @param {{[key: string]: any}[]} entries
+     */
+    function renderPreviewLanguages(body, entries) {
+        const list = createPreviewEl('ul', `${_toolPrefix}_previewSkillList`);
+        entries.forEach((entry) => {
+            if (!previewHasContent(entry)) {
+                return;
+            }
+            const language = firstNonEmptyStr(entry, ['language']);
+            if (!language) {
+                return;
+            }
+            const fluency = firstNonEmptyStr(entry, ['fluency']);
+            const text = fluency ? `${language} (${fluency})` : language;
+            list.appendChild(createPreviewEl('li', '', text));
+        });
+        if (list.hasChildNodes()) {
+            body.appendChild(list);
+        }
+    }
+
+    /**
+     * Render a full JSON Resume object into the preview panel. Purely additive/imperative DOM
+     * building - no `.innerHTML` is used anywhere, to stay compatible with LinkedIn's TrustedHTML CSP.
+     * @param {HTMLElement} container - Element to render into. Will be cleared first.
+     * @param {{[key: string]: any}|null} jsonResume
+     */
+    function renderResumePreview(container, jsonResume) {
+        clearEl(container);
+        if (!jsonResume || typeof jsonResume !== 'object' || Array.isArray(jsonResume)) {
+            container.appendChild(createPreviewEl('p', `${_toolPrefix}_previewError`, "Couldn't parse JSON for preview."));
+            return;
+        }
+
+        renderPreviewBasics(container, jsonResume.basics);
+
+        if (Array.isArray(jsonResume.work) && jsonResume.work.length) {
+            appendPreviewSection(container, 'Work Experience', (body) => renderPreviewWorkLike(body, jsonResume.work, ['company', 'name']));
+        }
+        if (Array.isArray(jsonResume.education) && jsonResume.education.length) {
+            appendPreviewSection(container, 'Education', (body) => renderPreviewEducation(body, jsonResume.education));
+        }
+        if (Array.isArray(jsonResume.skills) && jsonResume.skills.length) {
+            appendPreviewSection(container, 'Skills', (body) => renderPreviewSkills(body, jsonResume.skills));
+        }
+        if (Array.isArray(jsonResume.volunteer) && jsonResume.volunteer.length) {
+            appendPreviewSection(container, 'Volunteer', (body) => renderPreviewWorkLike(body, jsonResume.volunteer, ['organization', 'company']));
+        }
+        if (Array.isArray(jsonResume.certificates) && jsonResume.certificates.length) {
+            appendPreviewSection(container, 'Certificates', (body) => renderPreviewCertificates(body, jsonResume.certificates));
+        }
+        if (Array.isArray(jsonResume.awards) && jsonResume.awards.length) {
+            appendPreviewSection(container, 'Awards', (body) => renderPreviewAwards(body, jsonResume.awards));
+        }
+        if (Array.isArray(jsonResume.publications) && jsonResume.publications.length) {
+            appendPreviewSection(container, 'Publications', (body) => renderPreviewPublications(body, jsonResume.publications));
+        }
+        if (Array.isArray(jsonResume.languages) && jsonResume.languages.length) {
+            appendPreviewSection(container, 'Languages', (body) => renderPreviewLanguages(body, jsonResume.languages));
+        }
+
+        if (!container.hasChildNodes()) {
+            container.appendChild(createPreviewEl('p', `${_toolPrefix}_previewEmpty`, 'No resume data to preview yet.'));
+        }
+    }
+
+    /**
+     * Parse the (possibly hand-edited) contents of the raw JSON textarea and (re)render the
+     * preview panel from it, so the textarea always stays the single source of truth for what
+     * gets shown, in either tab.
+     * @param {HTMLElement} previewPanelEl
+     * @param {HTMLTextAreaElement} textareaEl
+     */
+    function refreshPreviewFromTextarea(previewPanelEl, textareaEl) {
+        let parsedJson = null;
+        try {
+            parsedJson = JSON.parse(textareaEl.value);
+        } catch (err) {
+            parsedJson = null;
+        }
+        renderResumePreview(previewPanelEl, parsedJson);
+    }
+
     /**
      * Show the output modal with the results
      * @param {{[key: string]: any}} jsonResume - JSON Resume
@@ -1547,13 +2028,73 @@ window.LinkedinToResumeJson = (() => {
             const modalBody = document.createElement('div');
             modalBody.className = `${_toolPrefix}_modalBody`;
 
+            // Create tab bar (toggle between the raw JSON textarea and the human-readable preview)
+            const tabBar = document.createElement('div');
+            tabBar.className = `${_toolPrefix}_tabBar`;
+
+            const rawTabButton = document.createElement('button');
+            rawTabButton.type = 'button';
+            rawTabButton.id = `${_toolPrefix}_rawTabButton`;
+            rawTabButton.className = `${_toolPrefix}_tabButton`;
+            rawTabButton.textContent = 'Raw JSON';
+
+            const previewTabButton = document.createElement('button');
+            previewTabButton.type = 'button';
+            previewTabButton.id = `${_toolPrefix}_previewTabButton`;
+            previewTabButton.className = `${_toolPrefix}_tabButton`;
+            previewTabButton.textContent = 'Preview';
+
+            tabBar.appendChild(rawTabButton);
+            tabBar.appendChild(previewTabButton);
+
+            // Create raw JSON panel, holding the existing (untouched) textarea
+            const rawPanel = document.createElement('div');
+            rawPanel.id = `${_toolPrefix}_rawPanel`;
+            rawPanel.className = `${_toolPrefix}_panel`;
+
             // Create textarea
             const textarea = document.createElement('textarea');
             textarea.id = `${_toolPrefix}_exportTextField`;
             textarea.textContent = 'Export will appear here...';
 
-            // Append textarea to modal body
-            modalBody.appendChild(textarea);
+            // Append textarea to raw panel
+            rawPanel.appendChild(textarea);
+
+            // Create human-readable preview panel. Populated on-demand (see setActiveTab below) from
+            // the textarea's current contents, so it always reflects whatever JSON is being shown/edited.
+            const previewPanel = document.createElement('div');
+            previewPanel.id = `${_toolPrefix}_previewPanel`;
+            previewPanel.className = `${_toolPrefix}_panel ${_toolPrefix}_previewPanel`;
+            previewPanel.style.display = 'none';
+
+            /**
+             * Switch between the "raw" and "preview" tabs.
+             * @param {'raw'|'preview'} tabName
+             */
+            function setActiveTab(tabName) {
+                const isPreview = tabName === 'preview';
+                rawPanel.style.display = isPreview ? 'none' : 'block';
+                previewPanel.style.display = isPreview ? 'block' : 'none';
+                rawTabButton.classList.toggle(`${_toolPrefix}_tabButton_active`, !isPreview);
+                previewTabButton.classList.toggle(`${_toolPrefix}_tabButton_active`, isPreview);
+                if (isPreview) {
+                    refreshPreviewFromTextarea(previewPanel, textarea);
+                }
+            }
+
+            rawTabButton.addEventListener('click', () => {
+                setActiveTab('raw');
+            });
+            previewTabButton.addEventListener('click', () => {
+                setActiveTab('preview');
+            });
+            // Default to the raw JSON tab, matching prior behavior
+            setActiveTab('raw');
+
+            // Append tab bar and panels to modal body
+            modalBody.appendChild(tabBar);
+            modalBody.appendChild(rawPanel);
+            modalBody.appendChild(previewPanel);
 
             // Assemble modal
             modal.appendChild(topBar);
@@ -1583,6 +2124,14 @@ window.LinkedinToResumeJson = (() => {
         /** @type {HTMLTextAreaElement} */
         const outputTextArea = modalWrapper.querySelector(`#${_toolPrefix}_exportTextField`);
         outputTextArea.value = JSON.stringify(jsonResume, null, 2);
+
+        // If the preview tab is currently the active view (e.g. modal was already open), keep it
+        // in sync by re-rendering from the textarea's (now updated) contents.
+        /** @type {HTMLElement} */
+        const previewPanelEl = modalWrapper.querySelector(`#${_toolPrefix}_previewPanel`);
+        if (previewPanelEl && previewPanelEl.style.display !== 'none') {
+            refreshPreviewFromTextarea(previewPanelEl, outputTextArea);
+        }
     };
 
     LinkedinToResumeJson.prototype.injectStyles = function injectStyles() {
@@ -1634,6 +2183,121 @@ window.LinkedinToResumeJson = (() => {
             #${_toolPrefix}_exportTextField {
                 width: 100%;
                 min-height: 300px;
+            }
+            .${_toolPrefix}_tabBar {
+                display: flex;
+                gap: 8px;
+                border-bottom: 2px solid #ccc;
+                margin-bottom: 12px;
+            }
+            .${_toolPrefix}_tabButton {
+                background: none;
+                border: none;
+                border-bottom: 3px solid transparent;
+                padding: 8px 14px;
+                font-size: medium;
+                cursor: pointer;
+                color: #333;
+            }
+            .${_toolPrefix}_tabButton_active {
+                border-bottom-color: #0a66c2;
+                font-weight: bold;
+                color: #0a66c2;
+            }
+            .${_toolPrefix}_previewPanel {
+                width: 100%;
+                min-height: 300px;
+                max-height: 60vh;
+                overflow-y: auto;
+                box-sizing: border-box;
+                padding: 8px 16px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-family: Georgia, 'Times New Roman', serif;
+                color: #222;
+                text-align: left;
+            }
+            .${_toolPrefix}_previewName {
+                margin: 0 0 4px 0;
+                font-size: xx-large;
+            }
+            .${_toolPrefix}_previewLabel {
+                font-size: large;
+                color: #444;
+                margin-bottom: 4px;
+            }
+            .${_toolPrefix}_previewLocation {
+                font-size: small;
+                color: #666;
+                margin-bottom: 8px;
+            }
+            .${_toolPrefix}_previewContactList {
+                list-style: none;
+                padding: 0;
+                margin: 0 0 8px 0;
+                font-size: small;
+                color: #444;
+            }
+            .${_toolPrefix}_previewContactList li {
+                margin-bottom: 2px;
+            }
+            .${_toolPrefix}_previewSummary {
+                margin-top: 8px;
+                line-height: 1.4;
+            }
+            .${_toolPrefix}_previewSection {
+                margin-top: 20px;
+                padding-top: 12px;
+                border-top: 1px solid #ddd;
+            }
+            .${_toolPrefix}_previewHeading {
+                font-size: large;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                margin: 0 0 10px 0;
+                color: #111;
+            }
+            .${_toolPrefix}_previewEntry {
+                margin-bottom: 14px;
+            }
+            .${_toolPrefix}_previewEntryTitle {
+                margin: 0;
+                font-size: medium;
+                font-weight: bold;
+            }
+            .${_toolPrefix}_previewEntrySubtitle {
+                font-style: italic;
+                color: #444;
+            }
+            .${_toolPrefix}_previewEntryDates {
+                font-size: small;
+                color: #666;
+                margin-bottom: 4px;
+            }
+            .${_toolPrefix}_previewEntrySummary {
+                margin: 4px 0;
+                line-height: 1.4;
+            }
+            .${_toolPrefix}_previewEntryHighlights {
+                margin: 4px 0;
+                padding-left: 20px;
+            }
+            .${_toolPrefix}_previewEntryMeta {
+                font-size: small;
+                color: #666;
+            }
+            .${_toolPrefix}_previewSkillList {
+                list-style: disc;
+                padding-left: 20px;
+                margin: 0;
+            }
+            .${_toolPrefix}_previewError {
+                color: #b00020;
+                font-style: italic;
+            }
+            .${_toolPrefix}_previewEmpty {
+                color: #666;
+                font-style: italic;
             }`;
             document.body.appendChild(styleElement);
         }
