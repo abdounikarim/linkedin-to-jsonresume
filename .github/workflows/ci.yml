@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-typecheck-build:
+    name: Lint, type-check, and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Matches the version pinned in .tool-versions
+          node-version: '22.16.0'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run type-check
+
+      # TODO: the "test" script in package.json is still the placeholder
+      # `"Error: no test specified" && exit 1` (tracked separately). Once a
+      # real test suite lands, remove `continue-on-error` so failures block CI.
+      - name: Test
+        run: npm test
+        continue-on-error: true
+
+      - name: Install go-task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+
+      - name: Build bookmarklet
+        run: task build:bookmarklet
+
+      - name: Build browser extension
+        run: task build:browserext
