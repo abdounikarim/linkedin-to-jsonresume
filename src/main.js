@@ -1476,6 +1476,10 @@ window.LinkedinToResumeJson = (() => {
         const fileName = `${_outputJsonLegacy.basics.name.replace(/\s/g, '_')}.resume.json`;
         const fileContents = JSON.stringify(rawJson, null, 2);
         this.debugConsole.log(fileContents);
+        const sectionWarnings = getIncompleteSectionWarnings(this.profileParseSummary && this.profileParseSummary.sections);
+        if (sectionWarnings.length) {
+            this.debugConsole.warn('Export may be missing data:', sectionWarnings);
+        }
         promptDownload(fileContents, fileName, 'application/json');
     };
 
@@ -1488,7 +1492,7 @@ window.LinkedinToResumeJson = (() => {
         };
         console.log(parsedExport);
         if (this.parseSuccess) {
-            this.showModal(parsedExport.raw);
+            this.showModal(parsedExport.raw, this.profileParseSummary);
         } else {
             alert('Could not extract JSON from current page. Make sure you are on a profile page that you have access to');
         }
@@ -1503,12 +1507,55 @@ window.LinkedinToResumeJson = (() => {
     };
 
     /**
+     * Human-readable labels for each parsed section, used when building the "incomplete data" warning banner
+     * @type {Record<keyof ParseProfileSchemaResultSummary['sections'], string>}
+     */
+    const _sectionDisplayNames = {
+        basics: 'Basic profile info',
+        languages: 'Languages',
+        attachments: 'Portfolio / attachment links',
+        education: 'Education history',
+        work: 'Work history',
+        volunteer: 'Volunteer experience',
+        certificates: 'Certificates',
+        skills: 'Skills',
+        projects: 'Projects',
+        awards: 'Awards',
+        publications: 'Publications'
+    };
+
+    /**
+     * Build human-readable warning messages for any parsed sections that are not fully trustworthy.
+     * Sections that are 'success' or 'empty' are intentionally skipped - 'empty' just means the profile
+     * legitimately had no entries for that section, which isn't worth warning about.
+     * @param {ParseProfileSchemaResultSummary['sections']} [sections]
+     * @returns {string[]}
+     */
+    function getIncompleteSectionWarnings(sections) {
+        if (!sections) {
+            return [];
+        }
+        const sectionKeys = /** @type {Array<keyof ParseProfileSchemaResultSummary['sections']>} */ (Object.keys(sections));
+        return sectionKeys
+            .filter((sectionKey) => sections[sectionKey] === 'incomplete' || sections[sectionKey] === 'fail')
+            .map((sectionKey) => {
+                const displayName = _sectionDisplayNames[sectionKey] || sectionKey;
+                if (sections[sectionKey] === 'incomplete') {
+                    return `${displayName} may be incomplete — LinkedIn limited how much data could be retrieved.`;
+                }
+                return `${displayName} could not be retrieved.`;
+            });
+    }
+
+    /**
      * Show the output modal with the results
      * @param {{[key: string]: any}} jsonResume - JSON Resume
+     * @param {ParseProfileSchemaResultSummary} [resultSummary] - Per-section parse result summary, used to warn about missing/truncated data
      */
-    LinkedinToResumeJson.prototype.showModal = function showModal(jsonResume) {
+    LinkedinToResumeJson.prototype.showModal = function showModal(jsonResume, resultSummary) {
         const _this = this;
         const modalWrapperId = `${_toolPrefix}_modalWrapper`;
+        const warningBannerId = `${_toolPrefix}_warningBanner`;
         let modalWrapper = document.getElementById(modalWrapperId);
         if (modalWrapper) {
             modalWrapper.style.display = 'block';
@@ -1547,12 +1594,19 @@ window.LinkedinToResumeJson = (() => {
             const modalBody = document.createElement('div');
             modalBody.className = `${_toolPrefix}_modalBody`;
 
+            // Create (initially empty / hidden) warning banner, for surfacing incomplete/failed sections
+            const warningBanner = document.createElement('div');
+            warningBanner.id = warningBannerId;
+            warningBanner.className = `${_toolPrefix}_warningBanner`;
+            warningBanner.style.display = 'none';
+
             // Create textarea
             const textarea = document.createElement('textarea');
             textarea.id = `${_toolPrefix}_exportTextField`;
             textarea.textContent = 'Export will appear here...';
 
-            // Append textarea to modal body
+            // Append banner and textarea to modal body
+            modalBody.appendChild(warningBanner);
             modalBody.appendChild(textarea);
 
             // Assemble modal
@@ -1579,6 +1633,33 @@ window.LinkedinToResumeJson = (() => {
                 textarea.select();
             });
         }
+        // (Re)build the warning banner contents, based on the latest per-section parse results
+        /** @type {HTMLElement} */
+        const warningBanner = modalWrapper.querySelector(`#${warningBannerId}`);
+        // Clear out any previously rendered warning contents
+        while (warningBanner.firstChild) {
+            warningBanner.removeChild(warningBanner.firstChild);
+        }
+        const sectionWarnings = getIncompleteSectionWarnings(resultSummary && resultSummary.sections);
+        if (sectionWarnings.length) {
+            const warningHeading = document.createElement('div');
+            warningHeading.className = `${_toolPrefix}_warningHeading`;
+            warningHeading.textContent = '⚠ Some data may be missing from this export:';
+            warningBanner.appendChild(warningHeading);
+
+            const warningList = document.createElement('ul');
+            warningList.className = `${_toolPrefix}_warningList`;
+            sectionWarnings.forEach((warningText) => {
+                const listItem = document.createElement('li');
+                listItem.textContent = warningText;
+                warningList.appendChild(listItem);
+            });
+            warningBanner.appendChild(warningList);
+            warningBanner.style.display = 'block';
+        } else {
+            warningBanner.style.display = 'none';
+        }
+
         // Actually set textarea text
         /** @type {HTMLTextAreaElement} */
         const outputTextArea = modalWrapper.querySelector(`#${_toolPrefix}_exportTextField`);
@@ -1630,6 +1711,22 @@ window.LinkedinToResumeJson = (() => {
                 margin-left: 5%;
                 margin-top: 20px;
                 padding-top: 8px;
+            }
+            .${_toolPrefix}_warningBanner {
+                background-color: #fff3cd;
+                border: 1px solid #ffe69c;
+                border-radius: 6px;
+                color: #664d03;
+                padding: 10px 14px;
+                margin-bottom: 12px;
+                font-size: small;
+            }
+            .${_toolPrefix}_warningHeading {
+                font-weight: bold;
+            }
+            .${_toolPrefix}_warningList {
+                margin: 4px 0 0 0;
+                padding-left: 20px;
             }
             #${_toolPrefix}_exportTextField {
                 width: 100%;
