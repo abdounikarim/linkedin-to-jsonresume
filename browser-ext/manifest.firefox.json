@@ -1,0 +1,12 @@
+{
+    "//": "Firefox-only overrides, merged on top of manifest.json by build-scripts/prep-browserext.js when building with --target=firefox. Each top-level key here fully replaces the corresponding key from the base manifest (see mergeManifest() for details) - it is not deep-merged.",
+    "background": {
+        "scripts": ["browser-polyfill.min.js", "background.js"]
+    },
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "linkedin-to-jsonresume@joshuatz.com",
+            "strict_min_version": "109.0"
+        }
+    }
+}

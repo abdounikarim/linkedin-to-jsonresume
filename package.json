@@ -26,6 +26,7 @@
         "@types/archiver": "^6.0.3",
         "@types/chrome": "0.0.326",
         "@types/fs-extra": "^11.0.4",
+        "@types/webextension-polyfill": "^0.12.6",
         "@typescript-eslint/eslint-plugin": "^8.33.0",
         "@typescript-eslint/parser": "^8.33.0",
         "archiver": "^7.0.1",
@@ -61,7 +62,8 @@
         ]
     },
     "dependencies": {
-        "@dan/vcards": "^2.10.0"
+        "@dan/vcards": "^2.10.0",
+        "webextension-polyfill": "^0.12.0"
     },
     "overrides": {
         "eslint-config-airbnb-base": {
