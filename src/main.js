@@ -1555,6 +1555,63 @@ window.LinkedinToResumeJson = (() => {
             // Append textarea to modal body
             modalBody.appendChild(textarea);
 
+            // --- Gist sharing controls ---
+            // NOTE: Same TrustedHTML constraint as above applies here - build with
+            // createElement / textContent, never innerHTML.
+
+            const gistSection = document.createElement('div');
+            gistSection.className = `${_toolPrefix}_gistSection`;
+
+            // Warning shown *before* the user can click the create button, since
+            // anonymous gists can't be edited/deleted later without a GitHub
+            // account, and are visible to anyone with the link forever.
+            const gistWarning = document.createElement('div');
+            gistWarning.className = `${_toolPrefix}_gistWarning`;
+            gistWarning.textContent =
+                'Warning: this uploads your exported resume (name, contact info, work history, etc.) to GitHub as an anonymous Gist. ' +
+                'Even "unlisted"/private gists are visible to anyone who has the URL and cannot be edited or deleted afterwards unless you save the link shown below - GitHub does not let anonymous gists be managed later. ' +
+                'Only proceed if you are comfortable with that data being hosted on a third-party service indefinitely.';
+            gistSection.appendChild(gistWarning);
+
+            // Row with the "make public" checkbox + create button
+            const gistControlsRow = document.createElement('div');
+            gistControlsRow.className = `${_toolPrefix}_gistControlsRow`;
+
+            const gistPublicLabel = document.createElement('label');
+            gistPublicLabel.className = `${_toolPrefix}_gistPublicLabel`;
+            const gistPublicCheckbox = document.createElement('input');
+            gistPublicCheckbox.type = 'checkbox';
+            gistPublicCheckbox.id = `${_toolPrefix}_gistPublicCheckbox`;
+            // Default to unchecked (private/unlisted) - user must opt-in to public
+            gistPublicCheckbox.checked = false;
+            gistPublicLabel.appendChild(gistPublicCheckbox);
+            gistPublicLabel.appendChild(document.createTextNode(' Make gist public (discoverable by others, not just via direct link)'));
+
+            const gistCreateButton = document.createElement('button');
+            gistCreateButton.type = 'button';
+            gistCreateButton.id = `${_toolPrefix}_gistCreateButton`;
+            gistCreateButton.className = `${_toolPrefix}_gistCreateButton`;
+            gistCreateButton.textContent = 'Create Shareable Gist';
+
+            gistControlsRow.appendChild(gistPublicLabel);
+            gistControlsRow.appendChild(gistCreateButton);
+            gistSection.appendChild(gistControlsRow);
+
+            // Result / error area - hidden until there is something to show
+            const gistResultArea = document.createElement('div');
+            gistResultArea.id = `${_toolPrefix}_gistResultArea`;
+            gistResultArea.className = `${_toolPrefix}_gistResultArea`;
+            gistResultArea.style.display = 'none';
+            gistSection.appendChild(gistResultArea);
+
+            const gistErrorArea = document.createElement('div');
+            gistErrorArea.id = `${_toolPrefix}_gistErrorArea`;
+            gistErrorArea.className = `${_toolPrefix}_gistErrorArea`;
+            gistErrorArea.style.display = 'none';
+            gistSection.appendChild(gistErrorArea);
+
+            modalBody.appendChild(gistSection);
+
             // Assemble modal
             modal.appendChild(topBar);
             modal.appendChild(modalBody);
@@ -1578,11 +1635,129 @@ window.LinkedinToResumeJson = (() => {
             textarea.addEventListener('click', () => {
                 textarea.select();
             });
+            gistCreateButton.addEventListener('click', () => {
+                // Read the textarea's *live* value, not the original `jsonResume` object passed
+                // into `showModal`, so this respects any in-place edits / section toggling that
+                // may have changed what is actually displayed / intended to be shared.
+                _this.createGist(textarea.value, gistPublicCheckbox.checked, gistCreateButton, gistResultArea, gistErrorArea);
+            });
         }
         // Actually set textarea text
         /** @type {HTMLTextAreaElement} */
         const outputTextArea = modalWrapper.querySelector(`#${_toolPrefix}_exportTextField`);
         outputTextArea.value = JSON.stringify(jsonResume, null, 2);
+    };
+
+    /**
+     * Publish the passed-in JSON string as an anonymous GitHub Gist, via GitHub's
+     * public (unauthenticated) Gist API. No auth token is used or required.
+     *
+     * NOTE: Anonymous gists cannot be edited or deleted later by the creator
+     * except via the URLs returned at creation time, so the result is surfaced
+     * prominently in `resultAreaEl`. GitHub also rate-limits unauthenticated API
+     * requests fairly strictly (around 60 requests/hour per IP, per GitHub's
+     * general API docs at the time of writing), so failures here (including
+     * rate-limiting and plain network errors) are shown inline via `errorAreaEl`
+     * rather than only logged to console.
+     * @param {string} jsonString - Current (live) contents of the export textarea
+     * @param {boolean} isPublic - Whether the gist should be publicly listed/searchable
+     * @param {HTMLButtonElement} buttonEl - The "Create Shareable Gist" button, so it can be disabled while the request is in-flight
+     * @param {HTMLElement} resultAreaEl - Element to populate with the resulting gist link on success
+     * @param {HTMLElement} errorAreaEl - Element to populate with an error message on failure
+     */
+    LinkedinToResumeJson.prototype.createGist = async function createGist(jsonString, isPublic, buttonEl, resultAreaEl, errorAreaEl) {
+        const _this = this;
+
+        // Reset any prior result/error state
+        resultAreaEl.style.display = 'none';
+        while (resultAreaEl.firstChild) {
+            resultAreaEl.removeChild(resultAreaEl.firstChild);
+        }
+        errorAreaEl.style.display = 'none';
+        while (errorAreaEl.firstChild) {
+            errorAreaEl.removeChild(errorAreaEl.firstChild);
+        }
+
+        const originalButtonText = buttonEl.textContent;
+        buttonEl.disabled = true;
+        buttonEl.textContent = 'Creating gist...';
+
+        /**
+         * @param {string} message
+         */
+        function showError(message) {
+            errorAreaEl.textContent = `Failed to create gist: ${message}`;
+            errorAreaEl.style.display = 'block';
+        }
+
+        try {
+            const body = {
+                description: 'Resume exported via linkedin-to-jsonresume',
+                public: !!isPublic,
+                files: {
+                    'resume.json': {
+                        content: jsonString
+                    }
+                }
+            };
+            const response = await fetch('https://api.github.com/gists', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/vnd.github+json'
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) {
+                if (response.status === 403 || response.status === 429) {
+                    showError(`GitHub rate limit likely exceeded for anonymous requests (HTTP ${response.status}). Please wait a while before trying again.`);
+                } else {
+                    let details = '';
+                    try {
+                        const errJson = await response.json();
+                        details = errJson && errJson.message ? ` - ${errJson.message}` : '';
+                    } catch (parseErr) {
+                        // Ignore - body may not be JSON
+                    }
+                    showError(`HTTP ${response.status}${details}`);
+                }
+                return;
+            }
+
+            const gistJson = await response.json();
+            const gistUrl = gistJson.html_url || (gistJson.id ? `https://gist.github.com/${gistJson.id}` : '');
+
+            const successHeading = document.createElement('div');
+            successHeading.className = `${_toolPrefix}_gistResultHeading`;
+            successHeading.textContent = isPublic ? 'Public gist created:' : 'Unlisted (private) gist created:';
+            resultAreaEl.appendChild(successHeading);
+
+            const link = document.createElement('a');
+            link.href = gistUrl;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = gistUrl;
+            resultAreaEl.appendChild(link);
+
+            const idLine = document.createElement('div');
+            idLine.className = `${_toolPrefix}_gistResultId`;
+            idLine.textContent = `Gist ID: ${gistJson.id}`;
+            resultAreaEl.appendChild(idLine);
+
+            const reminder = document.createElement('div');
+            reminder.className = `${_toolPrefix}_gistResultReminder`;
+            reminder.textContent = 'Save this link now - since this gist was created anonymously, you will not be able to find, edit, or delete it later unless you keep this URL.';
+            resultAreaEl.appendChild(reminder);
+
+            resultAreaEl.style.display = 'block';
+        } catch (err) {
+            _this.debugConsole.log('Error creating gist', err);
+            showError(err && err.message ? err.message : 'Network error - check your connection and try again.');
+        } finally {
+            buttonEl.disabled = false;
+            buttonEl.textContent = originalButtonText;
+        }
     };
 
     LinkedinToResumeJson.prototype.injectStyles = function injectStyles() {
@@ -1634,6 +1809,73 @@ window.LinkedinToResumeJson = (() => {
             #${_toolPrefix}_exportTextField {
                 width: 100%;
                 min-height: 300px;
+            }
+            .${_toolPrefix}_gistSection {
+                width: 100%;
+                margin-top: 16px;
+                padding-top: 12px;
+                border-top: 1px solid #ccc;
+            }
+            .${_toolPrefix}_gistWarning {
+                font-size: small;
+                color: #7a5b00;
+                background-color: #fff3cd;
+                border: 1px solid #ffe69c;
+                border-radius: 6px;
+                padding: 8px 10px;
+                margin-bottom: 10px;
+            }
+            .${_toolPrefix}_gistControlsRow {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .${_toolPrefix}_gistPublicLabel {
+                font-size: small;
+            }
+            .${_toolPrefix}_gistCreateButton {
+                padding: 6px 14px;
+                border: 2px solid black;
+                border-radius: 8px;
+                background-color: white;
+                font-size: medium;
+                cursor: pointer;
+            }
+            .${_toolPrefix}_gistCreateButton:disabled {
+                cursor: not-allowed;
+                opacity: 0.6;
+            }
+            .${_toolPrefix}_gistResultArea {
+                margin-top: 10px;
+                padding: 8px 10px;
+                background-color: #e6f4ea;
+                border: 1px solid #b7e0c2;
+                border-radius: 6px;
+                font-size: small;
+                word-break: break-all;
+            }
+            .${_toolPrefix}_gistResultHeading {
+                font-weight: bold;
+                margin-bottom: 4px;
+            }
+            .${_toolPrefix}_gistResultId {
+                margin-top: 4px;
+                color: #444;
+            }
+            .${_toolPrefix}_gistResultReminder {
+                margin-top: 6px;
+                font-style: italic;
+            }
+            .${_toolPrefix}_gistErrorArea {
+                margin-top: 10px;
+                padding: 8px 10px;
+                background-color: #fbe6e6;
+                border: 1px solid #f0b8b8;
+                border-radius: 6px;
+                font-size: small;
+                color: #8a1f1f;
             }`;
             document.body.appendChild(styleElement);
         }
