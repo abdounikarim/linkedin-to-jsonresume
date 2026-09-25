@@ -350,11 +350,6 @@ window.LinkedinToResumeJson = (() => {
             website: companyLiPageFromCompanyUrn(positionObj['companyUrn'], db)
         };
         parseAndAttachResumeDates(parsedWork, positionObj);
-        // Lookup company website
-        if (positionObj.company && positionObj.company['*miniCompany']) {
-            // @TODO - website is not in schema. Use voyager?
-            // let companyInfo = db.data[position.company['*miniCompany']];
-        }
 
         // Push to final json
         _outputJsonLegacy.work.push(parsedWork);
