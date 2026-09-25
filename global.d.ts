@@ -159,6 +159,22 @@ declare global {
         };
     }
 
+    /**
+     * Broad categorization of why a parsing strategy (internal API or embedded schema) failed.
+     * Used to give the user a more specific hint than a generic error when *all* strategies fail.
+     *  - `cookie`: LinkedIn session cookie (JSESSIONID) was missing / malformed
+     *  - `schema`: LinkedIn's page or API response structure was not recognized
+     *  - `unknown`: anything else (network error, rate limiting, unsupported page, etc.)
+     */
+    type ParseFailureCategory = 'cookie' | 'schema' | 'unknown';
+
+    interface ParseFailureReason {
+        /** Which method / strategy the failure was captured in, for debugging */
+        source: string;
+        category: ParseFailureCategory;
+        message: string;
+    }
+
     type SchemaVersion = 'legacy' | 'stable' | 'beta';
 
     type ResumeSchemaLegacy = _ResumeSchemaLegacy;
