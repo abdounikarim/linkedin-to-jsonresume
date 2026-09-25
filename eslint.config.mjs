@@ -134,4 +134,27 @@ export default [
             '@typescript-eslint/no-require-imports': 'off',
         },
     },
+
+    // Mirrors the legacy config's `overrides` entry scoping vitest globals and
+    // relaxed import rules to test files only.
+    {
+        files: ['test/**/*.js', 'src/**/*.test.js'],
+        languageOptions: {
+            globals: {
+                ...globals.node,
+                describe: 'readonly',
+                it: 'readonly',
+                test: 'readonly',
+                expect: 'readonly',
+                vi: 'readonly',
+                beforeAll: 'readonly',
+                afterAll: 'readonly',
+                beforeEach: 'readonly',
+                afterEach: 'readonly',
+            },
+        },
+        rules: {
+            'import/no-extraneous-dependencies': ['error', { devDependencies: true }],
+        },
+    },
 ];
