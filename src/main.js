@@ -1816,17 +1816,31 @@ window.LinkedinToResumeJson = (() => {
             });
         }
         // At a minimum, we need month and day in order to include BDAY
+        /** @type {string | undefined} */
+        let partialBirthday;
         if (profile.birthDate && 'day' in profile.birthDate && 'month' in profile.birthDate) {
             const birthdayLi = /** @type {LiDate} */ (profile.birthDate);
             if (!birthdayLi.year) {
                 /**
                  * Users can choose to OMIT their birthyear, but leave month and day (thus hiding age)
-                 * - vCard actually allows this in spec, but only in > v4 (RFC-6350): https://tools.ietf.org/html/rfc6350#:~:text=BDAY%3A--0415, https://tools.ietf.org/html/rfc6350#section-4.3.1
+                 * - vCard allows this in spec, but only in >= v4 (RFC-6350): https://tools.ietf.org/html/rfc6350#:~:text=BDAY%3A--0415, https://tools.ietf.org/html/rfc6350#section-4.3.1
                  *       - Governed by ISO-8601, which allows truncated under ISO.8601.2000, such as `--MMDD`
                  *       - Example: `BDAY:--0415`
-                 * - Since the vCard library I'm using (many platforms) only support V3, I'll just exclude it from the vCard; including a partial date in v3 (violating the spec) will result in a corrupt card that will crash many programs
+                 * - The `@dan/vcards` library defaults to emitting v3, but it also fully supports v4 output for every
+                 *   other field (EMAIL/TEL/ADR/PHOTO all branch on `vCard.getMajorVersion()`); it just has no public
+                 *   API for setting a partial (year-less) BDAY value (its formatter always calls `Date`-based
+                 *   YYYY-MM-DD formatting on `vCard.birthday`).
+                 * - So: for this (uncommon) partial-birthdate case only, we bump the whole card to v4 (so every field
+                 *   stays internally consistent with the version we declare, instead of a spec-violating v3 card
+                 *   with a v4-only BDAY bolted on) and manually splice in a truncated `BDAY:--MMDD` line after
+                 *   `getFormattedString()` runs, below. When a full birthdate (or none) is present, the card is left
+                 *   at the library's default v3, so existing behavior/compatibility (Outlook, Google Contacts, Apple
+                 *   Contacts) is unaffected for the common case.
                  */
-                console.warn(`Warning: User has a "partial" birthdate (year is omitted). This is not supported in vCard version 3 or under.`);
+                vCard.version = '4.0';
+                const month = `${birthdayLi.month}`.padStart(2, '0');
+                const day = `${birthdayLi.day}`.padStart(2, '0');
+                partialBirthday = `--${month}${day}`;
             } else {
                 // Full birthday (can be used for age)
                 vCard.birthday = liDateToJSDate(birthdayLi);
@@ -1858,7 +1872,11 @@ window.LinkedinToResumeJson = (() => {
             }
         }
         const fileName = `${profile.firstName}_${profile.lastName}.vcf`;
-        const fileContents = vCard.getFormattedString();
+        let fileContents = vCard.getFormattedString();
+        if (partialBirthday) {
+            // Splice a truncated ISO-8601 BDAY (only valid in vCard v4+) in just before END:VCARD
+            fileContents = fileContents.replace(/(\r?\n)END:VCARD/, `$1BDAY:${partialBirthday}$1END:VCARD`);
+        }
         this.debugConsole.log('vCard generated', fileContents);
         promptDownload(fileContents, fileName, 'text/vcard');
         return vCard;

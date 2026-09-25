@@ -76,7 +76,7 @@ There are several main buttons in the browser extension, with different effects.
 
 
 #### vCard Limitations and Caveats
- - Partial birthdate (aka `BDAY`) values (e.g. where the profile has a month and day, but has not opted to share their birth year), are only supported in v4 (RFC-6350) and above. This extension currently only supports v3, so in these situations the tool will simply omit the BDAY field from the export
+ - Partial birthdate (aka `BDAY`) values (e.g. where the profile has a month and day, but has not opted to share their birth year), are only supported in v4 (RFC-6350) and above, using a truncated ISO-8601 form (e.g. `BDAY:--0415`). Since exported vCards otherwise default to v3 (for the broadest compatibility with clients like Outlook, Google Contacts, and Apple Contacts), the tool bumps just that specific export to v4 whenever a partial birthdate is detected, so the value can be included instead of silently dropped. Profiles with a full birthdate (or none at all) are unaffected and still export as v3, as before
      - See [#32](https://github.com/joshuatz/linkedin-to-jsonresume/issues/32) for details
  - The LinkedIn display photo (included in vCard) served by LI is a temporary URL, with a fixed expiration date set by LinkedIn. From observations, this is often set months into the future, but could still be problematic for address book clients that don't cache images. To work around this, I'm converting it to a base64 string; this should work with most vCard clients, but also increases the vCard file size considerably.
 
