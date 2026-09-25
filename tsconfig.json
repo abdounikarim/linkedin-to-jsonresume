@@ -6,7 +6,9 @@
         "build-browserext",
         "webstore-zips",
         "scratch",
-        "eslint.config.mjs"
+        "eslint.config.mjs",
+        "test",
+        "vitest.config.mjs"
     ],
     "compilerOptions": {
         "baseUrl": ".",

@@ -5,7 +5,8 @@
     "private": true,
     "main": "src/main.js",
     "scripts": {
-        "test": "\"Error: no test specified\" && exit 1",
+        "test": "vitest run",
+        "test:watch": "vitest",
         "lint": "eslint \"**/*.{js,ts}\"",
         "lint:fix": "eslint \"**/*.{js,ts}\" --fix",
         "type-check": "tsc --noEmit"
@@ -42,6 +43,7 @@
         "prettier": "^3.5.3",
         "replace": "^1.2.2",
         "typescript": "^5.8.3",
+        "vitest": "^5.0.1",
         "webpack": "^5.99.9",
         "webpack-cli": "^6.0.1"
     },
