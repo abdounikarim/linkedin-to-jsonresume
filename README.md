@@ -2,7 +2,7 @@
 
 > An extremely easy-to-use browser extension for exporting your full LinkedIn Profile to a JSON Resume file or string.
 
-<!-- Non-functional until chrome extension is fixed -->
+<!-- The extension has been migrated to Manifest V3 (see Issue #81), but the Webstore listing itself has not yet been republished/re-reviewed, so this link is still commented out for now. -->
 <!-- ## Chrome Extension 📦 - [Webstore Link](https://chrome.google.com/webstore/detail/json-resume-exporter/caobgmmcpklomkcckaenhjlokpmfbdec) -->
 
 
@@ -36,14 +36,14 @@ There are (or *were*) a few different options for how to use this:
     2. Drag and drop the indicated link in the page to your bookmarks (toolbar)
     3. Navigate to your LinkedIn profile
     4. Click the bookmarklet, and then a modal should pop up with the exported JSON
-- **Unsupported for now**: Chrome Extension
-    - Currently, this is only supported via [sideloading](#chrome-side-loading-instructions), since the extension has not yet been updated to be compatible with Google's manifest v3 requirements. See [Issue #81](https://github.com/joshuatz/linkedin-to-jsonresume/issues/81) for details.
+- **Full-featured**: Chrome Extension
+    - The extension has been migrated to Google's Manifest V3 requirements (see [Issue #81](https://github.com/joshuatz/linkedin-to-jsonresume/issues/81)), so it works again in current Chrome. It's not yet republished to the Chrome Webstore, so for now it's only available via [sideloading](#chrome-side-loading-instructions). If you run into problems, please open an issue.
 
 <details>
-    <summary><h2 style="display:inline;">Advanced Features (broken until extension fixed)</h2></summary>
+    <summary><h2 style="display:inline;">Advanced Features</h2></summary>
 
-> [!WARNING]
-> The following features are only supported inside the browser extension version of the program, which is currently broken. For details, see [Issue #81](https://github.com/joshuatz/linkedin-to-jsonresume/issues/81).
+> [!NOTE]
+> The following features are only supported inside the browser extension version of the program (not the bookmarklet).
 
 ### Schema Versions
 This tool supports multiple version of [the JSON Resume Schema specification](https://github.com/jsonresume/resume-schema) for export, which you can easily swap between in the dropdown selector! ✨

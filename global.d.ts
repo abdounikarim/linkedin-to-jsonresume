@@ -164,4 +164,18 @@ declare global {
     type ResumeSchemaLegacy = _ResumeSchemaLegacy;
     type ResumeSchemaStable = _ResumeSchemaStable;
     type ResumeSchemaBeyondSpec = _ResumeSchemaBeyondSpec;
+
+    /**
+     * Extra `window` properties used to pass state between separate `chrome.scripting.executeScript`
+     * injections into a LinkedIn tab (from `browser-ext/popup.js`), since each injected function is
+     * serialized independently and can't close over any outside variables.
+     */
+    interface Window {
+        /** Set by the bundled `main.js` (built from `src/main.js`) once it's injected into the page. */
+        LinkedinToResumeJson?: any;
+        /** The (possibly reused) instance of `LinkedinToResumeJson` created for this page. */
+        liToJrInstance?: any;
+        /** Whether the injected instance was created in debug mode (via the `li2jr_debug` query param). */
+        isDebug?: boolean;
+    }
 }
