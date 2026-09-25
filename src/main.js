@@ -68,6 +68,18 @@ window.LinkedinToResumeJson = (() => {
     let _scrolledToLoad = false;
     const _toolPrefix = 'jtzLiToResumeJson';
     const _stylesInjected = false;
+    /**
+     * Shown when the internal (Voyager) API can't find a usable session cookie to authenticate with.
+     * Kept consistent with the README's "Troubleshooting" section.
+     */
+    const _cookieErrorMessage =
+        'Could not find a valid LinkedIn session cookie (JSESSIONID). Try refreshing the profile page and make sure you are still logged into LinkedIn. ' +
+        'If this keeps happening, LinkedIn may have changed its session cookie format/name - please add "?li2jr_debug=true" to the page URL, check the browser console for errors (see the README\'s Troubleshooting section), and file an issue with those details.';
+    /**
+     * Shown when a Voyager API response was received, but did not match the structure this tool expects.
+     */
+    const _profileStructureErrorMessage =
+        'Could not get profile response object; a response was received from LinkedIn, but its structure was not recognized (LinkedIn may have changed its page or API format).';
 
     /**
      * Builds a mini-db out of a LI schema obj
@@ -785,6 +797,12 @@ window.LinkedinToResumeJson = (() => {
         this.profileUrnId = null;
         /** @type {ParseProfileSchemaResultSummary} */
         this.profileParseSummary = null;
+        /**
+         * Accumulates the specific reasons why parsing strategies (internal API, embedded schema) failed,
+         * so a more helpful message can be surfaced if *all* strategies end up failing.
+         * @type {ParseFailureReason[]}
+         */
+        this.parseFailureReasons = [];
         /** @type {string | null} */
         this.lastScannedLocale = null;
         /** @type {string | null} */
@@ -859,6 +877,57 @@ window.LinkedinToResumeJson = (() => {
 
     // Regular Methods
 
+    /**
+     * Record a specific reason why a parsing strategy failed, so that if *all* strategies ultimately
+     * fail, a more helpful message can be shown to the user than a generic "could not extract JSON" alert.
+     * This is purely for diagnosability - it does not change fallback / retry behavior.
+     * @param {string} source - which method/strategy the failure came from (useful for debugging)
+     * @param {unknown} error - the error/reason that was caught
+     * @param {ParseFailureCategory} [category] - explicit category; auto-detected from the error message if omitted
+     * @returns {ParseFailureReason}
+     */
+    LinkedinToResumeJson.prototype.recordParseFailure = function recordParseFailure(source, error, category) {
+        const message = error instanceof Error ? error.message : String(error);
+        let resolvedCategory = category;
+        if (!resolvedCategory) {
+            if (/session cookie|JSESSIONID/i.test(message)) {
+                resolvedCategory = 'cookie';
+            } else if (/profile response|expected structure/i.test(message)) {
+                resolvedCategory = 'schema';
+            } else {
+                resolvedCategory = 'unknown';
+            }
+        }
+        /** @type {ParseFailureReason} */
+        const reason = { source, category: resolvedCategory, message };
+        this.parseFailureReasons.push(reason);
+        return reason;
+    };
+
+    /**
+     * Build a user-facing message for when parsing has completely failed (both the internal API and
+     * the embedded-schema fallback), using whatever specific failure reasons were captured along the way.
+     * @param {string} [actionDescription] - what the tool was trying to do, for the lead-in sentence
+     * @returns {string}
+     */
+    LinkedinToResumeJson.prototype.getParseFailureMessage = function getParseFailureMessage(actionDescription = 'extract JSON from current page') {
+        const reasons = this.parseFailureReasons || [];
+        const hasCookieIssue = reasons.some((reason) => reason.category === 'cookie');
+        const hasSchemaIssue = reasons.some((reason) => reason.category === 'schema');
+        let specificMsg;
+        if (hasCookieIssue) {
+            specificMsg = 'This looks like a LinkedIn session issue: no valid session cookie (JSESSIONID) was found, or LinkedIn may have changed its session cookie format.';
+        } else if (hasSchemaIssue) {
+            specificMsg = "LinkedIn's page/API structure was not recognized - LinkedIn may have changed its page layout or internal API format, or this may not be a supported profile page.";
+        } else {
+            specificMsg = 'An unknown error occurred while trying to parse this page.';
+        }
+        return (
+            `Could not ${actionDescription}. Make sure you are on a profile page that you have access to. ${specificMsg} ` +
+            'For more details, add "?li2jr_debug=true" to the page URL and check the browser console for red error messages (see the README\'s Troubleshooting section) before filing an issue.'
+        );
+    };
+
     LinkedinToResumeJson.prototype.parseEmbeddedLiSchema = async function parseEmbeddedLiSchema() {
         const _this = this;
         let doneWithBlockIterator = false;
@@ -881,11 +950,14 @@ window.LinkedinToResumeJson = (() => {
                         _this.debugConsole.log(`Parse from embedded schema, success = ${profileParserResult.parseSuccess}`);
                         if (profileParserResult.parseSuccess) {
                             this.profileParseSummary = profileParserResult;
+                        } else {
+                            _this.recordParseFailure('parseEmbeddedLiSchema', new Error(_profileStructureErrorMessage), 'schema');
                         }
                     } else {
                         _this.debugConsole.log(`Valid schema found, but schema profile id of "${schemaProfileId}" does not match desired profile ID of "${desiredProfileId}".`);
                     }
                 } catch (e) {
+                    _this.recordParseFailure('parseEmbeddedLiSchema', e, 'schema');
                     if (_this.debug) {
                         throw e;
                     }
@@ -898,6 +970,11 @@ window.LinkedinToResumeJson = (() => {
             }
         }
         if (!foundSomeSchema) {
+            _this.recordParseFailure(
+                'parseEmbeddedLiSchema',
+                new Error('Failed to find any embedded profile schema blocks on the page (LinkedIn may have changed its page structure, or this may not be a supported profile page).'),
+                'schema'
+            );
             _this.debugConsole.warn('Failed to find any embedded schema blocks!');
         }
     };
@@ -943,6 +1020,7 @@ window.LinkedinToResumeJson = (() => {
 
             return true;
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApiFullProfile', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager) - FullProfile', e);
         }
         return false;
@@ -963,6 +1041,7 @@ window.LinkedinToResumeJson = (() => {
                 return true;
             }
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApiFullSkills', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager) - FullSkills', e);
         }
         return false;
@@ -1017,6 +1096,7 @@ window.LinkedinToResumeJson = (() => {
                 return true;
             }
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApiContactInfo', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager) - Contact Info', e);
         }
         return false;
@@ -1046,6 +1126,7 @@ window.LinkedinToResumeJson = (() => {
                 return true;
             }
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApiBasicAboutMe', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager) - Basic About Me', e);
         }
         return false;
@@ -1073,6 +1154,7 @@ window.LinkedinToResumeJson = (() => {
                 return true;
             }
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApiAdvancedAboutMe', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager) - AdvancedAboutMe', e);
         }
         return false;
@@ -1097,6 +1179,7 @@ window.LinkedinToResumeJson = (() => {
                 }
             });
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApiRecommendations', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager) - Recommendations', e);
         }
         return false;
@@ -1203,6 +1286,7 @@ window.LinkedinToResumeJson = (() => {
                 });
             });
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApiWork', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager) - Work', e);
         }
     };
@@ -1218,6 +1302,7 @@ window.LinkedinToResumeJson = (() => {
                 parseAndPushEducation(edu, db, this);
             });
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApiEducation', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager) - Education', e);
         }
     };
@@ -1232,6 +1317,7 @@ window.LinkedinToResumeJson = (() => {
                 });
             });
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApiVolunteer', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager) - Volunteer Entries', e);
         }
     };
@@ -1282,6 +1368,7 @@ window.LinkedinToResumeJson = (() => {
                 this.debugConsole.error('Using internal API (Voyager) failed completely!');
             }
         } catch (e) {
+            this.recordParseFailure('parseViaInternalApi', e);
             this.debugConsole.warn('Error parsing using internal API (Voyager)', e);
         }
     };
@@ -1397,7 +1484,7 @@ window.LinkedinToResumeJson = (() => {
             return this.profileParseSummary;
         }
 
-        throw new Error('Could not get profile response object');
+        throw new Error(_profileStructureErrorMessage);
     };
 
     /**
@@ -1430,6 +1517,8 @@ window.LinkedinToResumeJson = (() => {
                 _outputJsonLegacy = JSON.parse(JSON.stringify(resumeJsonTemplateLegacy));
                 _outputJsonStable = JSON.parse(JSON.stringify(resumeJsonTemplateStable));
                 _outputJsonBetaPartial = JSON.parse(JSON.stringify(resumeJsonTemplateBetaPartial));
+                // Reset failure reasons from any previous attempt, so stale reasons don't linger
+                _this.parseFailureReasons = [];
 
                 // Trigger full load
                 await _this.triggerAjaxLoadByScrolling();
@@ -1473,6 +1562,12 @@ window.LinkedinToResumeJson = (() => {
     /** @param {SchemaVersion} version */
     LinkedinToResumeJson.prototype.parseAndDownload = async function parseAndDownload(version = 'stable') {
         const rawJson = await this.parseAndGetRawJson(version);
+        if (!this.parseSuccess) {
+            const failureMessage = this.getParseFailureMessage();
+            console.error(failureMessage, this.parseFailureReasons);
+            alert(failureMessage);
+            return;
+        }
         const fileName = `${_outputJsonLegacy.basics.name.replace(/\s/g, '_')}.resume.json`;
         const fileContents = JSON.stringify(rawJson, null, 2);
         this.debugConsole.log(fileContents);
@@ -1490,7 +1585,9 @@ window.LinkedinToResumeJson = (() => {
         if (this.parseSuccess) {
             this.showModal(parsedExport.raw);
         } else {
-            alert('Could not extract JSON from current page. Make sure you are on a profile page that you have access to');
+            const failureMessage = this.getParseFailureMessage();
+            console.error(failureMessage, this.parseFailureReasons);
+            alert(failureMessage);
         }
     };
 
@@ -1775,8 +1872,21 @@ window.LinkedinToResumeJson = (() => {
     };
 
     LinkedinToResumeJson.prototype.generateVCard = async function generateVCard() {
-        const profileResSummary = await this.getParsedProfile();
-        const contactInfoObj = await this.voyagerFetch(_voyagerEndpoints.contactInfo);
+        this.parseFailureReasons = [];
+        /** @type {ParseProfileSchemaResultSummary} */
+        let profileResSummary;
+        /** @type {LiResponse} */
+        let contactInfoObj;
+        try {
+            profileResSummary = await this.getParsedProfile();
+            contactInfoObj = await this.voyagerFetch(_voyagerEndpoints.contactInfo);
+        } catch (e) {
+            this.recordParseFailure('generateVCard', e);
+            const failureMessage = this.getParseFailureMessage('generate a vCard from current page');
+            console.error(failureMessage, this.parseFailureReasons);
+            alert(failureMessage);
+            return;
+        }
         this.exportVCard(profileResSummary, contactInfoObj);
     };
 
@@ -1995,7 +2105,9 @@ window.LinkedinToResumeJson = (() => {
         }
         return new Promise((resolve, reject) => {
             // Get the csrf token - should be stored as a cookie
-            const csrfTokenString = getCookie('JSESSIONID').replace(/"/g, '');
+            // `getCookie` returns `null` if the cookie is missing entirely, so guard before calling `.replace`
+            const rawCookieValue = getCookie('JSESSIONID');
+            const csrfTokenString = rawCookieValue ? rawCookieValue.replace(/"/g, '') : '';
             if (csrfTokenString) {
                 /** @type {RequestInit} */
                 const fetchOptions = {
@@ -2037,7 +2149,7 @@ window.LinkedinToResumeJson = (() => {
                     }
                 });
             } else {
-                reject(new Error('Could not find valid LI cookie'));
+                reject(new Error(_cookieErrorMessage));
             }
         });
     };
