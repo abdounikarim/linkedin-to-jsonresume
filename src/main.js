@@ -1470,7 +1470,14 @@ window.LinkedinToResumeJson = (() => {
         return rawJson;
     };
 
-    /** @param {SchemaVersion} version */
+    /**
+     * NOTE: The "exclude section" checklist added to `showModal` is intentionally *not* wired up here.
+     * `parseAndDownload` can be (and is, e.g. from `browser-ext/popup.js`) invoked directly without the
+     * modal ever having been shown, so there is no reliable "current UI selection" to plumb through in
+     * that flow. Scoping the exclusion feature to the modal keeps this method's signature/behavior
+     * unchanged for existing callers; revisit if/when the download flow grows its own section-picker UI.
+     * @param {SchemaVersion} version
+     */
     LinkedinToResumeJson.prototype.parseAndDownload = async function parseAndDownload(version = 'stable') {
         const rawJson = await this.parseAndGetRawJson(version);
         const fileName = `${_outputJsonLegacy.basics.name.replace(/\s/g, '_')}.resume.json`;
@@ -1501,6 +1508,31 @@ window.LinkedinToResumeJson = (() => {
             modalWrapper.style.display = 'none';
         }
     };
+
+    /**
+     * Determine which top-level keys of a JSON Resume object are optional, user-excludable
+     * "sections" - i.e. non-empty arrays. `basics` is deliberately excluded since it holds
+     * core identity info, and should never be toggle-able / excludable.
+     * @param {{[key: string]: any}} jsonResume - JSON Resume
+     * @returns {string[]}
+     */
+    function getExcludableSectionKeys(jsonResume) {
+        return Object.keys(jsonResume).filter((key) => key !== 'basics' && Array.isArray(jsonResume[key]) && jsonResume[key].length > 0);
+    }
+
+    /**
+     * Build a shallow copy of a JSON Resume object with the given top-level section keys omitted entirely.
+     * @param {{[key: string]: any}} jsonResume - JSON Resume
+     * @param {string[]} excludedKeys - top-level keys to remove from the result
+     * @returns {{[key: string]: any}}
+     */
+    function buildResumeWithExclusions(jsonResume, excludedKeys) {
+        const filtered = { ...jsonResume };
+        excludedKeys.forEach((key) => {
+            delete filtered[key];
+        });
+        return filtered;
+    }
 
     /**
      * Show the output modal with the results
@@ -1547,12 +1579,20 @@ window.LinkedinToResumeJson = (() => {
             const modalBody = document.createElement('div');
             modalBody.className = `${_toolPrefix}_modalBody`;
 
+            // Create section-exclusion checklist container; its contents are (re)built in the
+            // section below that runs on every call to `showModal`, since the set of populated
+            // sections can differ between profiles / re-parses
+            const sectionToggles = document.createElement('div');
+            sectionToggles.id = `${_toolPrefix}_sectionToggles`;
+            sectionToggles.className = `${_toolPrefix}_sectionToggles`;
+
             // Create textarea
             const textarea = document.createElement('textarea');
             textarea.id = `${_toolPrefix}_exportTextField`;
             textarea.textContent = 'Export will appear here...';
 
-            // Append textarea to modal body
+            // Append checklist and textarea to modal body
+            modalBody.appendChild(sectionToggles);
             modalBody.appendChild(textarea);
 
             // Assemble modal
@@ -1582,7 +1622,60 @@ window.LinkedinToResumeJson = (() => {
         // Actually set textarea text
         /** @type {HTMLTextAreaElement} */
         const outputTextArea = modalWrapper.querySelector(`#${_toolPrefix}_exportTextField`);
-        outputTextArea.value = JSON.stringify(jsonResume, null, 2);
+        /** @type {HTMLDivElement} */
+        const sectionTogglesContainer = modalWrapper.querySelector(`#${_toolPrefix}_sectionToggles`);
+
+        // Recompute + re-render the JSON shown in the textarea based on which section checkboxes are
+        // currently checked. Runs entirely in-memory against the already-parsed `jsonResume`, so toggling
+        // never triggers a re-parse of the page.
+        const updateOutputFromToggles = () => {
+            /** @type {string[]} */
+            const excludedKeys = [];
+            sectionTogglesContainer.querySelectorAll('input[type="checkbox"]').forEach((checkboxEl) => {
+                const checkbox = /** @type {HTMLInputElement} */ (checkboxEl);
+                if (!checkbox.checked) {
+                    excludedKeys.push(checkbox.value);
+                }
+            });
+            outputTextArea.value = JSON.stringify(buildResumeWithExclusions(jsonResume, excludedKeys), null, 2);
+        };
+
+        // Rebuild the checklist from scratch on every call, since the set of populated sections can
+        // differ between profiles / re-parses. All boxes default to checked (nothing excluded), which
+        // preserves the tool's prior default export behavior exactly.
+        while (sectionTogglesContainer.firstChild) {
+            sectionTogglesContainer.removeChild(sectionTogglesContainer.firstChild);
+        }
+        const excludableKeys = getExcludableSectionKeys(jsonResume);
+        if (excludableKeys.length > 0) {
+            const togglesLabel = document.createElement('div');
+            togglesLabel.className = `${_toolPrefix}_sectionTogglesLabel`;
+            togglesLabel.textContent = 'Include sections:';
+            sectionTogglesContainer.appendChild(togglesLabel);
+
+            const togglesList = document.createElement('div');
+            togglesList.className = `${_toolPrefix}_sectionTogglesList`;
+            excludableKeys.forEach((key) => {
+                const toggleWrapper = document.createElement('label');
+                toggleWrapper.className = `${_toolPrefix}_sectionToggle`;
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = true;
+                checkbox.value = key;
+                checkbox.addEventListener('change', updateOutputFromToggles);
+
+                const checkboxLabel = document.createElement('span');
+                checkboxLabel.textContent = key;
+
+                toggleWrapper.appendChild(checkbox);
+                toggleWrapper.appendChild(checkboxLabel);
+                togglesList.appendChild(toggleWrapper);
+            });
+            sectionTogglesContainer.appendChild(togglesList);
+        }
+
+        updateOutputFromToggles();
     };
 
     LinkedinToResumeJson.prototype.injectStyles = function injectStyles() {
@@ -1630,6 +1723,26 @@ window.LinkedinToResumeJson = (() => {
                 margin-left: 5%;
                 margin-top: 20px;
                 padding-top: 8px;
+            }
+            .${_toolPrefix}_sectionToggles {
+                width: 100%;
+                margin-bottom: 12px;
+            }
+            .${_toolPrefix}_sectionTogglesLabel {
+                font-weight: bold;
+                margin-bottom: 6px;
+            }
+            .${_toolPrefix}_sectionTogglesList {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 4px 16px;
+            }
+            .${_toolPrefix}_sectionToggle {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                cursor: pointer;
+                text-transform: capitalize;
             }
             #${_toolPrefix}_exportTextField {
                 width: 100%;
